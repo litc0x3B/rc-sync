@@ -17,6 +17,10 @@ pkgs.python3Packages.buildPythonApplication {
     platformdirs
   ];
 
+  makeWrapperArgs = [
+    "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.rclone ]}"
+  ];
+
   nativeCheckInputs = with pkgs.python3Packages; [
     pytestCheckHook
   ];

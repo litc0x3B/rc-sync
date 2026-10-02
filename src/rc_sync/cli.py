@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import os
+import shutil
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -122,6 +124,13 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help="Output path for schema.json (default: next to config file)",
+    )
+
+    # 5. rclone (direct pass-through to rclone)
+    subparsers.add_parser(
+        "rclone",
+        help="Pass commands and arguments directly to rclone (e.g. 'rc-sync rclone config')",
+        add_help=False,
     )
 
     return parser
@@ -311,13 +320,46 @@ def handle_config(args: argparse.Namespace) -> int:
         return 1
 
 
+def handle_rclone(args: Sequence[str]) -> int:
+    """Pass command and arguments directly to rclone."""
+    config_path = get_config_path()
+    rclone_cmd = "rclone"
+    if config_path.is_file():
+        try:
+            cfg = load_config(config_path)
+            rclone_cmd = cfg.rclone_path
+        except Exception:
+            pass
+
+    bin_path = shutil.which(rclone_cmd)
+    if not bin_path:
+        sys.stderr.write(f"Error: rclone executable '{rclone_cmd}' not found in PATH.\n")
+        return 1
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    cmd_args = [bin_path] + list(args)
+    try:
+        os.execvp(bin_path, cmd_args)
+    except Exception as e:
+        sys.stderr.write(f"Failed to execute rclone: {e}\n")
+        return 1
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Main CLI entry point."""
     setup_logger()
-    parser = build_parser()
 
     if argv is None:
         argv = sys.argv[1:]
+
+    # Direct pass-through to rclone
+    if argv and argv[0] == "rclone":
+        return handle_rclone(argv[1:])
+
+    parser = build_parser()
 
     # Preprocess argv to handle '--extra-flags <value>' even when value starts with '-'
     processed_argv: list[str] = []

@@ -107,3 +107,13 @@ def test_cli_daemon_enable(tmp_path):
         code = main(["daemon", "enable"])
         assert code == 0
         mock_enable.assert_called_once()
+
+
+def test_cli_rclone_passthrough():
+    with patch("shutil.which", return_value="/usr/bin/rclone"), patch("os.execvp") as mock_exec:
+        main(["rclone", "config", "--param", "val"])
+        mock_exec.assert_called_once_with(
+            "/usr/bin/rclone",
+            ["/usr/bin/rclone", "config", "--param", "val"],
+        )
+
