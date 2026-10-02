@@ -1,0 +1,181 @@
+"""rclone interaction: execution, streaming, lsf checks, mkdir, and flag manipulation."""
+
+import os
+import re
+import shlex
+import subprocess
+from dataclasses import dataclass
+
+from rc_sync.logger import get_logger, stream_rclone_line
+
+
+@dataclass
+class LsfResult:
+    exists: bool
+    is_empty: bool
+    error: str | None = None
+
+
+def expand_path(path: str) -> str:
+    """Expand user tilde ~ for local paths while preserving remote prefixes."""
+    clean = path.strip()
+    # If path starts with ~ and has no colon before slash, expand user
+    colon_idx = clean.find(":")
+    slash_idx = clean.find("/")
+
+    if colon_idx != -1 and (slash_idx == -1 or colon_idx < slash_idx):
+        # Likely a remote path like remote:path or drive:/folder
+        return clean
+    return os.path.expanduser(clean)
+
+
+def interpolate_flags(flag_str: str, sync_freq_minutes: int) -> str:
+    """Replace %t with sync_freq_minutes, %% with %."""
+    if not flag_str:
+        return ""
+
+    def _replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token == "%%":
+            return "%"
+        if token == "%t":
+            return str(sync_freq_minutes)
+        return token
+
+    return re.sub(r"%(%|t)?", _replace, flag_str)
+
+
+def combine_flags(
+    cli_override: bool,
+    cli_extra_flags: str,
+    is_init: bool,
+    global_extra_flags: str,
+    mapping_extra_flags: str,
+    mapping_override_flags: str | None,
+    mapping_extra_flags_init: str,
+    mapping_override_flags_init: str | None,
+    sync_freq_minutes: int,
+) -> list[str]:
+    """Combine global, mapping, and CLI flags according to spec rules."""
+    if cli_override:
+        parts = [cli_extra_flags]
+    else:
+        if is_init:
+            if mapping_override_flags_init is not None:
+                parts = [mapping_override_flags_init, cli_extra_flags]
+            else:
+                parts = [global_extra_flags, mapping_extra_flags_init, cli_extra_flags]
+        else:
+            if mapping_override_flags is not None:
+                parts = [mapping_override_flags, cli_extra_flags]
+            else:
+                parts = [global_extra_flags, mapping_extra_flags, cli_extra_flags]
+
+    interpolated = [
+        interpolate_flags(p, sync_freq_minutes).strip()
+        for p in parts
+        if p and p.strip()
+    ]
+    combined_str = " ".join(interpolated)
+    return shlex.split(combined_str)
+
+
+class RcloneRunner:
+    """Handles running rclone commands: lsf, mkdir, and bisync."""
+
+    def __init__(self, rclone_path: str = "rclone") -> None:
+        self.rclone_path = rclone_path
+        self._logger = get_logger()
+
+    def check_path_lsf(self, path: str) -> LsfResult:
+        """Check path existence and whether it is empty using rclone lsf."""
+        cmd = [self.rclone_path, "lsf", path]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+        except Exception as e:
+            return LsfResult(exists=False, is_empty=False, error=str(e))
+
+        if res.returncode == 0:
+            lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+            return LsfResult(exists=True, is_empty=(len(lines) == 0), error=None)
+        elif res.returncode == 3:
+            # Code 3: Directory not found -> considered empty and will be created
+            return LsfResult(exists=False, is_empty=True, error=None)
+        else:
+            err = res.stderr.strip() or f"rclone lsf exited with code {res.returncode}"
+            return LsfResult(exists=False, is_empty=False, error=err)
+
+    def mkdir(self, path: str) -> tuple[int, str]:
+        """Create directory recursively using rclone mkdir."""
+        cmd = [self.rclone_path, "mkdir", path]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            output = res.stderr.strip() or res.stdout.strip()
+            return res.returncode, output
+        except Exception as e:
+            return -1, str(e)
+
+    def run_bisync(
+        self,
+        path1: str,
+        path2: str,
+        flags: list[str],
+        alias: str,
+        force_resync: bool = False,
+    ) -> int:
+        """Run rclone bisync with real-time streaming output."""
+        cmd = [self.rclone_path, "bisync", path1, path2]
+
+        final_flags = list(flags)
+        if force_resync and "--resync" not in final_flags:
+            final_flags.insert(0, "--resync")
+
+        cmd.extend(final_flags)
+
+        # Log full command
+        cmd_str = " ".join(shlex.quote(c) if (" " in c or not c) else c for c in cmd)
+        self._logger.info(f"Running: {cmd_str}", extra={"context": f"alias:{alias}"})
+
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            if proc.stdout:
+                for line in proc.stdout:
+                    stream_rclone_line(line)
+
+            proc.wait()
+            code = proc.returncode
+
+            if code == 0:
+                self._logger.success(
+                    "Mapping completed successfully.",
+                    extra={"context": f"alias:{alias}"},
+                )
+            else:
+                self._logger.error(
+                    f"rclone exited with code {code}.",
+                    extra={"context": f"alias:{alias}"},
+                )
+            return code
+
+        except KeyboardInterrupt:
+            if proc:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            raise
+        except Exception as e:
+            self._logger.error(
+                f"Failed to execute rclone: {e}",
+                extra={"context": f"alias:{alias}"},
+            )
+            return 1
