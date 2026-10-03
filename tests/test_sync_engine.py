@@ -145,7 +145,7 @@ def test_sync_engine_initial_resync_uses_init_flags(tmp_path):
     assert code == 0
     mock_bisync.assert_called_once()
     flags = mock_bisync.call_args[1]["flags"]
-    assert flags == ["--global-init", "--mapping-init"]
+    assert flags == ["--global-init", "--mapping-init", "--regular-only", "--resync"]
 
 
 def test_sync_engine_override_flags(tmp_path):

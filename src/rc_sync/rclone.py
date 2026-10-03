@@ -57,26 +57,54 @@ def combine_flags(
     sync_freq_minutes: int,
     global_flags_init: str = "",
 ) -> list[str]:
-    """Combine global, mapping, and CLI flags according to spec rules."""
+    """Combine global, mapping, and CLI flags according to spec rules.
+
+    Semantics:
+    - If cli_override is True: ONLY CLI extra flags are used.
+    - Otherwise:
+      1. init_flags = (override_flags_init ? "" : global_flags_init) + extra_flags_init
+      2. flags = (override_flags ? "" : global_flags) + extra_flags
+      3. final_flags = (init_flags + flags + "--resync") if is_init else flags
+      CLI extra flags are appended to final_flags.
+    """
     if cli_override:
         parts = [cli_extra_flags]
     else:
+        init_parts: list[str] = []
+        if not mapping_override_flags_init and global_flags_init:
+            init_parts.append(global_flags_init)
+        if mapping_extra_flags_init:
+            init_parts.append(mapping_extra_flags_init)
+
+        reg_parts: list[str] = []
+        if not mapping_override_flags and global_flags:
+            reg_parts.append(global_flags)
+        if mapping_extra_flags:
+            reg_parts.append(mapping_extra_flags)
+
         if is_init:
-            if mapping_override_flags_init:
-                parts = [mapping_extra_flags_init, cli_extra_flags]
-            else:
-                parts = [global_flags_init, mapping_extra_flags_init, cli_extra_flags]
+            parts = init_parts + reg_parts + ["--resync"]
         else:
-            if mapping_override_flags:
-                parts = [mapping_extra_flags, cli_extra_flags]
-            else:
-                parts = [global_flags, mapping_extra_flags, cli_extra_flags]
+            parts = reg_parts
+
+        if cli_extra_flags:
+            parts.append(cli_extra_flags)
 
     interpolated = [
         interpolate_flags(p, sync_freq_minutes).strip() for p in parts if p and p.strip()
     ]
     combined_str = " ".join(interpolated)
-    return shlex.split(combined_str)
+    raw_tokens = shlex.split(combined_str)
+    tokens: list[str] = []
+    has_resync = False
+    for tok in raw_tokens:
+        if tok == "--resync":
+            if not has_resync:
+                tokens.append(tok)
+                has_resync = True
+        else:
+            tokens.append(tok)
+    return tokens
 
 
 class RcloneRunner:

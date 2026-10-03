@@ -12,16 +12,16 @@
 - alias - идентификатор маппинга (в YAML и Nix задаётся как ключ в словаре `mappings: <alias>: ...`)
 - path1 - первый путь (локальный или удалённый)
 - path2 - второй путь (локальный или удалённый)
-- extra_flags - дополнительные флаги, которые передаются rclone при обычной синхронизации (default = "")
-- override_flags - игнорировать глобальные флаги при обычной синхронизации (boolean, default = false)
-- extra_flags_init - дополнительные флаги rclone, применяемые ТОЛЬКО при автоматическом первичном resync (когда init_success == false) (default = "")
-- override_flags_init - игнорировать глобальные флаги ТОЛЬКО при автоматическом первичном resync (когда init_success == false) (boolean, default = false)
+- extra_flags - дополнительные флаги, которые передаются rclone при синхронизации (и обычной, и первичной) (default = "")
+- override_flags - игнорировать глобальные флаги `global_flags` (boolean, default = false)
+- extra_flags_init - дополнительные флаги rclone, применяемые ТОЛЬКО при первичном resync (когда init_success == false), добавляются к основным флагам (default = "")
+- override_flags_init - игнорировать глобальные флаги `global_flags_init` при первичном resync (boolean, default = false)
 - allow_init_non_empty - игнорировать обязательное условие для начального resync^ (default = false)
 - enabled (default = true)
 
 ### Глобальная конфигурация
-- global_flags - аргументы, которые передаются rclone при обычной синхронизации. (default = "--resilient --recover --max-lock %tm")
-- global_flags_init - аргументы, которые передаются rclone при автоматическом первичном resync. (default = "")
+- global_flags - аргументы, которые передаются rclone при синхронизации. (default = "--resilient --recover --max-lock %tm")
+- global_flags_init - аргументы, которые передаются rclone дополнительно к global_flags при автоматическом первичном resync. (default = "")
 - rclone_path - команда для вызова rclone. (default = "rclone")
 - sync_freq_minutes - Частота синхронизации в минутах. Обязательно >= 3
 - mappings - словарь конфигураций маппингов, индексированный по alias (в YAML: `mappings: <alias>: { path1: ..., path2: ... }`). Поддерживает валидацию уникальности алиасов и 100% автодополнение в Nix (`services.rc-sync.settings.mappings.<name>.*`).
@@ -85,17 +85,14 @@
 ## Поведение, ограничения, краевые случаи
 
 - Внутри всех строк для флагов можно использовать %t - значение sync_freq_minutes, % нужно экранировать чтобы он не считался спец символом (%%).
-- Алгоритм комбинирования флагов:
+- Семантика комбинирования флагов:
   - Если передан override-флаг в CLI (`--override-flags`), то используются ТОЛЬКО переданные CLI extra-флаги.
-  - Иначе:
-    - При автоматическом начальном resync (`init_success == false`):
-      - Если у маппинга `override_flags_init == true`, берутся `Mapping extra_flags_init + CLI extra_flags` (глобальный global_flags_init игнорируется).
-      - Иначе: `global_flags_init + Mapping extra_flags_init + CLI extra_flags`.
-    - При обычной синхронизации или ручном вызове:
-      - Флаги `*init` игнорируются.
-      - Если у маппинга `override_flags == true`, берутся `Mapping extra_flags + CLI extra_flags` (глобальный global_flags игнорируется).
-      - Иначе: `global_flags + Mapping extra_flags + CLI extra_flags`.
-  - СLI extra_flags и global_flags / global_flags_init применяются ко всем участвующим в синхронизации маппингам.
+  - В противном случае флаги формируются следующим образом:
+    1. `init_flags` = (`override_flags_init` ? `""` : `global_flags_init`) + `extra_flags_init`
+    2. `flags` = (`override_flags` ? `""` : `global_flags`) + `extra_flags`
+    3. `final_flags` = если `init_success == false` (первичный resync), то `init_flags` + `flags` + `"--resync"`, иначе (обычная синхронизация) `flags`
+  - Переданные в CLI extra-флаги (при отсутствии `--override-flags`) добавляются в конец итогового набора `final_flags`.
+  - Все флаги проходят подстановку переменной `%t` (значение `sync_freq_minutes`) и экранирования `%%`.
 - ^ обязательное условие начального resync - один из path1 и path2 должен быть пустым (случай, когда оба пути пустые, также считается валидным). Проверка содержимого выполняется через `rclone lsf`. Если оба пути не пустые и allow_init_non_empty == false, попытка синхронизации прерывается с понятным сообщением об ошибке.
 - В случае если одного из путей path1 и path2 не существует, то он должен быть создан с помощью `rclone mkdir` (работает рекурсивно как mkdir -p и для локальных, и для удалённых путей).
 - path1 и path2 равноправные и могут вести как на локальное так и на глобальное хранилище
