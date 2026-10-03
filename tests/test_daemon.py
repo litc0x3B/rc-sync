@@ -373,3 +373,19 @@ def test_daemon_enable_and_up_fail_when_unit_needs_changes_and_is_readonly(tmp_p
     finally:
         timer_p.chmod(0o644)
 
+
+def test_daemon_start_and_stop(tmp_path):
+    cfg = Config()
+    sm = StateManager(tmp_path / "state.json")
+    dm = DaemonManager(cfg, sm, systemd_dir=tmp_path / "systemd")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        assert dm.start() == 0
+        assert dm.stop() == 0
+
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert ["systemctl", "--user", "start", "rc-sync.timer"] in calls
+        assert ["systemctl", "--user", "stop", "rc-sync.timer", "rc-sync.service"] in calls
+
+

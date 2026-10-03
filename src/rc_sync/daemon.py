@@ -322,6 +322,42 @@ class DaemonManager:
             self._logger.error(f"Cannot execute systemctl: {e}", extra={"context": "daemon"})
             return 1
 
+    def start(self) -> int:
+        """Start rc-sync.timer in systemd."""
+        cmd = ["systemctl", "--user", "start", "rc-sync.timer"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0:
+                self._logger.info("Started rc-sync.timer.", extra={"context": "daemon"})
+            else:
+                self._logger.error(
+                    f"Failed to start rc-sync.timer: {res.stderr.strip()}",
+                    extra={"context": "daemon"},
+                )
+            return res.returncode
+        except Exception as e:
+            self._logger.error(f"Cannot execute systemctl: {e}", extra={"context": "daemon"})
+            return 1
+
+    def stop(self) -> int:
+        """Stop rc-sync.timer and rc-sync.service in systemd without disabling or removing units."""
+        cmd = ["systemctl", "--user", "stop", "rc-sync.timer", "rc-sync.service"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0:
+                self._logger.info(
+                    "Stopped rc-sync.timer and rc-sync.service.", extra={"context": "daemon"}
+                )
+            else:
+                self._logger.error(
+                    f"Failed to stop systemd units: {res.stderr.strip()}",
+                    extra={"context": "daemon"},
+                )
+            return res.returncode
+        except Exception as e:
+            self._logger.error(f"Cannot execute systemctl: {e}", extra={"context": "daemon"})
+            return 1
+
     def sync_timer_frequency(self) -> bool:
         """Check if existing rc-sync.timer matches config.sync_freq_minutes and update if needed.
 

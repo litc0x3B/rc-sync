@@ -304,6 +304,24 @@ def daemon_disable() -> None:
         raise typer.Exit(code=code)
 
 
+@daemon_app.command("start", help="Start timer in systemd")
+def daemon_start() -> None:
+    config, state_manager = _get_config_and_state("daemon")
+    dm = DaemonManager(config, state_manager)
+    code = dm.start()
+    if code != 0:
+        raise typer.Exit(code=code)
+
+
+@daemon_app.command("stop", help="Stop timer and active synchronization in systemd")
+def daemon_stop() -> None:
+    config, state_manager = _get_config_and_state("daemon")
+    dm = DaemonManager(config, state_manager)
+    code = dm.stop()
+    if code != 0:
+        raise typer.Exit(code=code)
+
+
 @daemon_app.command("status", help="Show systemd status")
 def daemon_status() -> None:
     config, state_manager = _get_config_and_state("daemon")

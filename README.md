@@ -133,6 +133,12 @@ rc-sync status
 # Stream daemon logs in real time
 rc-sync daemon logs -f
 
+# Temporarily stop the timer and active synchronization
+rc-sync daemon stop
+
+# Start the timer
+rc-sync daemon start
+
 # Temporarily stop and disable the timer
 rc-sync daemon disable
 
