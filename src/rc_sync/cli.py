@@ -278,8 +278,12 @@ def daemon_remove() -> None:
         raise typer.Exit(code=code)
 
 
-@daemon_app.command("enable", help="Generate units and enable timer in systemd")
+@daemon_app.command("enable", help="Enable timer for autostart in systemd")
 def daemon_enable(
+    now: Annotated[
+        bool,
+        typer.Option("--now", help="Start timer immediately in addition to enabling"),
+    ] = False,
     exec_path: Annotated[
         str | None,
         typer.Option(
@@ -290,25 +294,38 @@ def daemon_enable(
 ) -> None:
     config, state_manager = _get_config_and_state("daemon")
     dm = DaemonManager(config, state_manager)
-    code = dm.enable(exec_path=exec_path)
+    code = dm.enable(exec_path=exec_path, now=now)
     if code != 0:
         raise typer.Exit(code=code)
 
 
-@daemon_app.command("disable", help="Disable and stop timer in systemd")
-def daemon_disable() -> None:
+@daemon_app.command("disable", help="Disable timer autostart in systemd")
+def daemon_disable(
+    now: Annotated[
+        bool,
+        typer.Option("--now", help="Stop timer immediately in addition to disabling"),
+    ] = False,
+) -> None:
     config, state_manager = _get_config_and_state("daemon")
     dm = DaemonManager(config, state_manager)
-    code = dm.disable()
+    code = dm.disable(now=now)
     if code != 0:
         raise typer.Exit(code=code)
 
 
-@daemon_app.command("start", help="Start timer in systemd")
-def daemon_start() -> None:
+@daemon_app.command("start", help="Generate units if needed, reload daemon, and start timer in systemd")
+def daemon_start(
+    exec_path: Annotated[
+        str | None,
+        typer.Option(
+            "--exec-path",
+            help="Explicit path to rc-sync binary for ExecStart",
+        ),
+    ] = None,
+) -> None:
     config, state_manager = _get_config_and_state("daemon")
     dm = DaemonManager(config, state_manager)
-    code = dm.start()
+    code = dm.start(exec_path=exec_path)
     if code != 0:
         raise typer.Exit(code=code)
 

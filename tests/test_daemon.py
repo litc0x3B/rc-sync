@@ -74,6 +74,17 @@ def test_daemon_enable_disable(tmp_path):
         assert dm.disable() == 0
         assert mock_run.call_count >= 3
 
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert ["systemctl", "--user", "enable", "rc-sync.timer"] in calls
+        assert ["systemctl", "--user", "disable", "rc-sync.timer"] in calls
+
+        mock_run.reset_mock()
+        assert dm.enable(now=True) == 0
+        assert dm.disable(now=True) == 0
+        now_calls = [c[0][0] for c in mock_run.call_args_list]
+        assert ["systemctl", "--user", "enable", "--now", "rc-sync.timer"] in now_calls
+        assert ["systemctl", "--user", "disable", "--now", "rc-sync.timer"] in now_calls
+
 
 def test_daemon_up(tmp_path):
     cfg = Config()

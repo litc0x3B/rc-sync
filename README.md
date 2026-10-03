@@ -136,14 +136,16 @@ rc-sync daemon logs -f
 # Temporarily stop the timer and active synchronization
 rc-sync daemon stop
 
-# Start the timer
+# Start the timer (ensures units exist and reloads daemon if needed)
 rc-sync daemon start
 
-# Temporarily stop and disable the timer
+# Disable timer autostart (use --now to also stop it immediately)
 rc-sync daemon disable
+rc-sync daemon disable --now
 
-# Re-enable and start the timer
+# Enable timer autostart (use --now to also start it immediately)
 rc-sync daemon enable
+rc-sync daemon enable --now
 
 # Remove systemd units completely
 rc-sync daemon remove

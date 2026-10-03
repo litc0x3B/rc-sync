@@ -273,8 +273,8 @@ class DaemonManager:
             self._logger.info("Removed systemd user units.", extra={"context": "daemon"})
         return code
 
-    def enable(self, exec_path: str | None = None) -> int:
-        """Generate units, reload daemon, and enable timer."""
+    def enable(self, exec_path: str | None = None, now: bool = False) -> int:
+        """Generate units, reload daemon, and enable timer (with optional --now)."""
         try:
             self.generate_units(exec_path=exec_path)
         except (PermissionError, OSError) as e:
@@ -288,11 +288,16 @@ class DaemonManager:
         if code != 0:
             return code
 
-        cmd = ["systemctl", "--user", "enable", "--now", "rc-sync.timer"]
+        cmd = ["systemctl", "--user", "enable"]
+        if now:
+            cmd.append("--now")
+        cmd.append("rc-sync.timer")
+
         try:
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode == 0:
-                self._logger.info("Enabled and started rc-sync.timer.", extra={"context": "daemon"})
+                action = "Enabled and started" if now else "Enabled"
+                self._logger.info(f"{action} rc-sync.timer.", extra={"context": "daemon"})
             else:
                 self._logger.error(
                     f"Failed to enable rc-sync.timer: {res.stderr.strip()}",
@@ -303,15 +308,18 @@ class DaemonManager:
             self._logger.error(f"Cannot execute systemctl: {e}", extra={"context": "daemon"})
             return 1
 
-    def disable(self) -> int:
-        """Disable and stop rc-sync.timer."""
-        cmd = ["systemctl", "--user", "disable", "--now", "rc-sync.timer"]
+    def disable(self, now: bool = False) -> int:
+        """Disable timer in systemd (with optional --now)."""
+        cmd = ["systemctl", "--user", "disable"]
+        if now:
+            cmd.append("--now")
+        cmd.append("rc-sync.timer")
+
         try:
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode == 0:
-                self._logger.info(
-                    "Disabled and stopped rc-sync.timer.", extra={"context": "daemon"}
-                )
+                action = "Disabled and stopped" if now else "Disabled"
+                self._logger.info(f"{action} rc-sync.timer.", extra={"context": "daemon"})
             else:
                 self._logger.error(
                     f"Failed to disable rc-sync.timer: {res.stderr.strip()}",
@@ -322,8 +330,21 @@ class DaemonManager:
             self._logger.error(f"Cannot execute systemctl: {e}", extra={"context": "daemon"})
             return 1
 
-    def start(self) -> int:
-        """Start rc-sync.timer in systemd."""
+    def start(self, exec_path: str | None = None) -> int:
+        """Generate units if needed, reload daemon, and start rc-sync.timer."""
+        try:
+            self.generate_units(exec_path=exec_path)
+        except (PermissionError, OSError) as e:
+            self._logger.error(
+                f"Cannot install systemd units: {e}",
+                extra={"context": "daemon"},
+            )
+            return 1
+
+        code = self.daemon_reload()
+        if code != 0:
+            return code
+
         cmd = ["systemctl", "--user", "start", "rc-sync.timer"]
         try:
             res = subprocess.run(cmd, capture_output=True, text=True)
@@ -348,11 +369,20 @@ class DaemonManager:
                 self._logger.info(
                     "Stopped rc-sync.timer and rc-sync.service.", extra={"context": "daemon"}
                 )
-            else:
-                self._logger.error(
-                    f"Failed to stop systemd units: {res.stderr.strip()}",
-                    extra={"context": "daemon"},
+                return 0
+
+            err_msg = res.stderr.strip()
+            err_lower = err_msg.lower()
+            if "not loaded" in err_lower or "not found" in err_lower:
+                self._logger.info(
+                    "rc-sync units are not loaded or already stopped.", extra={"context": "daemon"}
                 )
+                return 0
+
+            self._logger.error(
+                f"Failed to stop systemd units: {err_msg}",
+                extra={"context": "daemon"},
+            )
             return res.returncode
         except Exception as e:
             self._logger.error(f"Cannot execute systemctl: {e}", extra={"context": "daemon"})

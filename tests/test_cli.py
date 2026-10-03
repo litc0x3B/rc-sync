@@ -304,7 +304,7 @@ def test_cli_daemon_commands_with_exec_path(tmp_path):
         mock_install.assert_called_once_with(exec_path=custom_path)
 
         assert main(["daemon", "enable", "--exec-path", custom_path]) == 0
-        mock_enable.assert_called_once_with(exec_path=custom_path)
+        mock_enable.assert_called_once_with(exec_path=custom_path, now=False)
 
         assert main(["daemon", "up", "--exec-path", custom_path]) == 0
         mock_up.assert_called_once_with(exec_path=custom_path)
@@ -325,8 +325,30 @@ def test_cli_daemon_start_and_stop(tmp_path):
         patch("rc_sync.daemon.DaemonManager.stop", return_value=0) as mock_stop,
     ):
         assert main(["daemon", "start"]) == 0
-        mock_start.assert_called_once()
+        mock_start.assert_called_once_with(exec_path=None)
 
         assert main(["daemon", "stop"]) == 0
         mock_stop.assert_called_once()
+
+
+def test_cli_daemon_enable_disable_now(tmp_path):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("sync_freq_minutes: 5\n")
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "RC_SYNC_CONFIG_PATH": str(cfg_file),
+                "RC_SYNC_STATE_PATH": str(tmp_path / "state.json"),
+            },
+        ),
+        patch("rc_sync.daemon.DaemonManager.enable", return_value=0) as mock_enable,
+        patch("rc_sync.daemon.DaemonManager.disable", return_value=0) as mock_disable,
+    ):
+        assert main(["daemon", "enable", "--now"]) == 0
+        mock_enable.assert_called_once_with(exec_path=None, now=True)
+
+        assert main(["daemon", "disable", "--now"]) == 0
+        mock_disable.assert_called_once_with(now=True)
+
 
