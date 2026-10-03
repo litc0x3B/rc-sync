@@ -122,6 +122,12 @@ mappings:
   rc-sync sync docs -- --resync --resync-mode newer
   ```
 
+- **Force initial synchronization**:
+  Force initial resync (applying configured `init_flags`) and bypass initial safety preconditions (e.g. requiring at least one directory to be empty):
+  ```bash
+  rc-sync sync docs --force-init
+  ```
+
 ---
 
 ### 3. Monitoring & Daemon Management

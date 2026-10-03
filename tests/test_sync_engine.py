@@ -235,3 +235,35 @@ def test_sync_engine_force_resync(tmp_path):
     assert code == 0
     assert mock_bisync.call_args[1]["force_resync"] is True
     assert mock_bisync.call_args[1]["context"] == "init:docs"
+
+
+def test_sync_engine_force_init(tmp_path):
+    cfg = Config(
+        mappings={
+            "docs": MappingConfig(
+                path1="/p1",
+                path2="/p2",
+                allow_init_non_empty=False,
+            )
+        }
+    )
+    sm = StateManager(tmp_path / "state.json")
+    assert sm.get_state("/p1", "/p2").init_success is False
+
+    engine = SyncEngine(cfg, sm, lock_path=tmp_path / "test.lock")
+
+    with (
+        patch.object(
+            engine.runner,
+            "check_path_lsf",
+            return_value=LsfResult(exists=True, is_empty=False),
+        ),
+        patch.object(engine.runner, "run_bisync", return_value=0) as mock_bisync,
+    ):
+        code = engine.sync(["docs"], force_init=True)
+
+    assert code == 0
+    assert mock_bisync.call_args[1]["force_resync"] is True
+    assert mock_bisync.call_args[1]["context"] == "init:docs"
+    assert sm.get_state("/p1", "/p2").init_success is True
+

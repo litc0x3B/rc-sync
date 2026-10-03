@@ -162,6 +162,7 @@ def test_cli_sync_invocation(tmp_path):
         assert code == 0
         mock_sync.assert_called_once_with(
             target_aliases=["m"],
+            force_init=False,
             cli_override_flags=False,
             cli_extra_flags="--resync",
         )
@@ -171,8 +172,19 @@ def test_cli_sync_invocation(tmp_path):
         assert code2 == 0
         mock_sync.assert_called_once_with(
             target_aliases=["m"],
+            force_init=False,
             cli_override_flags=False,
             cli_extra_flags="--resync --dry-run -v",
+        )
+
+        mock_sync.reset_mock()
+        code3 = main(["sync", "m", "--force-init", "--dry-run"])
+        assert code3 == 0
+        mock_sync.assert_called_once_with(
+            target_aliases=["m"],
+            force_init=True,
+            cli_override_flags=False,
+            cli_extra_flags="--dry-run",
         )
 
 
@@ -181,7 +193,8 @@ def test_cli_sync_help(capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert "TARGETS... [ARGS]..." in captured.out
-    assert "Trailing arguments (e.g. '--resync', '--dry-run', '-v') are forwarded" in captured.out
+    assert "--force-init" in captured.out
+    assert "Trailing arguments (e.g. '--dry-run', '-v') are forwarded" in captured.out
 
 
 def test_cli_daemon_enable(tmp_path):

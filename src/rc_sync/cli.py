@@ -93,13 +93,13 @@ def _get_config_and_state(context: str) -> tuple[Config, StateManager]:
     return config, state_manager
 
 
-# 1. sync (<alias>+|all) [--override-flags] [<extra-flags>]
+# 1. sync (<alias>+|all) [--force-init] [--override-flags] [<extra-flags>]
 @app.command(
     "sync",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     help="Run synchronization for specified mappings or all active mappings",
     epilog=(
-        "Trailing arguments (e.g. '--resync', '--dry-run', '-v') are forwarded to 'rclone bisync'."
+        "Trailing arguments (e.g. '--dry-run', '-v') are forwarded to 'rclone bisync'."
     ),
 )
 def sync_cmd(
@@ -115,6 +115,13 @@ def sync_cmd(
             autocompletion=complete_alias,
         ),
     ],
+    force_init: Annotated[
+        bool,
+        typer.Option(
+            "--force-init",
+            help="Force initial resync ignoring preconditions (e.g. non-empty paths)",
+        ),
+    ] = False,
     override_flags: Annotated[
         bool,
         typer.Option(
@@ -162,6 +169,15 @@ def sync_cmd(
     if ctx.args:
         extra_flags_parts.extend(ctx.args)
 
+    filtered_extra_flags: list[str] = []
+    for part in extra_flags_parts:
+        if part == "--force-init":
+            force_init = True
+        elif part == "--override-flags":
+            override_flags = True
+        else:
+            filtered_extra_flags.append(part)
+
     if not clean_targets:
         logger.error(
             "No sync targets specified. Provide mapping aliases or 'all'.",
@@ -169,11 +185,12 @@ def sync_cmd(
         )
         raise typer.Exit(code=2)
 
-    final_extra_flags = " ".join(part.strip() for part in extra_flags_parts if part.strip())
+    final_extra_flags = " ".join(part.strip() for part in filtered_extra_flags if part.strip())
 
     engine = SyncEngine(config=config, state_manager=state_manager)
     exit_code = engine.sync(
         target_aliases=clean_targets,
+        force_init=force_init,
         cli_override_flags=override_flags,
         cli_extra_flags=final_extra_flags,
     )

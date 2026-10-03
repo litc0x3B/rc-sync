@@ -28,6 +28,7 @@ class SyncEngine:
     def sync(
         self,
         target_aliases: Sequence[str],
+        force_init: bool = False,
         force_resync: bool = False,
         cli_override_flags: bool = False,
         cli_extra_flags: str = "",
@@ -67,10 +68,12 @@ class SyncEngine:
             succeeded_count = 0
             failed_count = 0
 
+            is_forced = force_init or force_resync
+
             for m in mappings_to_sync:
                 success = self._sync_single_mapping(
                     mapping=m,
-                    force_resync=force_resync,
+                    force_resync=is_forced,
                     cli_override_flags=cli_override_flags,
                     cli_extra_flags=cli_extra_flags,
                 )
@@ -146,7 +149,7 @@ class SyncEngine:
                 return False
 
             # Mandatory condition: at least one path must be empty
-            # (unless allow_init_non_empty or force_resync)
+            # (unless allow_init_non_empty or force_init)
             if (
                 (not res1.is_empty)
                 and (not res2.is_empty)

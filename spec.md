@@ -48,7 +48,7 @@
      - Состояние: `platformdirs.user_state_path("rc-sync") / "state.json"` (`~/.local/state/rc-sync/state.json`).
    - Файл конфигурации считается неизменяемым (read-only, для совместимости со средой Nix). Формат конфигурации — YAML, валидация структуры выполняется через Pydantic.
 2. Команды (интерфейс CLI и сообщения программы на английском языке):
-   1. `sync (<alias>+|all) [--override-flags] [<extra-flags>]` - запуск синхронизации указанных маппингов (или всех активных)
+   1. `sync (<alias>+|all) [--force-init] [--override-flags] [<extra-flags>]` - запуск синхронизации указанных маппингов (или всех активных). С флагом `--force-init` принудительно выполняет первичный resync (с флагами `init_flags + flags + "--resync"`), игнорируя условие обязательной пустоты одной из папок (`allow_init_non_empty`)
    2. `status` - отображение статуса демона (вывод `systemctl status` таймера и службы, если они существуют) и текущего статуса всех маппингов на основе файла состояния
    3. `daemon`:
       - `daemon print (service|timer) [--exec-path <path>]` - вывод отрендеренного содержимого юнита systemd (service или timer) в stdout (с опциональным явным заданием пути к бинарнику для ExecStart)
