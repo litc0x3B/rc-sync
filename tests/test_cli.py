@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, patch
 from rc_sync.cli import main
 
 
-def test_cli_config_template_cat(tmp_path, capsys, monkeypatch):
+def test_cli_config_template_print(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("rc_sync.config.get_installed_schema_path", lambda: None)
     monkeypatch.setattr("rc_sync.cli.get_installed_schema_path", lambda: None)
     target_config = tmp_path / "cfg" / "config.yaml"
     with patch.dict(os.environ, {"RC_SYNC_CONFIG_PATH": str(target_config)}):
-        code = main(["config", "template", "cat"])
+        code = main(["config", "template", "print"])
         assert code == 0
         captured = capsys.readouterr()
         expected_schema = tmp_path / "cfg" / "schema.json"
@@ -19,7 +19,7 @@ def test_cli_config_template_cat(tmp_path, capsys, monkeypatch):
         assert "sync_freq_minutes: 5" in captured.out
 
 
-def test_cli_config_template_cat_with_global_schema(tmp_path, capsys, monkeypatch):
+def test_cli_config_template_print_with_global_schema(tmp_path, capsys, monkeypatch):
     share_dir = tmp_path / "share" / "rc-sync"
     share_dir.mkdir(parents=True)
     fake_schema = share_dir / "schema.json"
@@ -30,7 +30,7 @@ def test_cli_config_template_cat_with_global_schema(tmp_path, capsys, monkeypatc
     monkeypatch.setattr("rc_sync.cli.get_installed_schema_path", lambda: fake_schema)
     monkeypatch.setenv("RC_SYNC_CONFIG_PATH", str(target_config))
 
-    code = main(["config", "template", "cat"])
+    code = main(["config", "template", "print"])
     assert code == 0
     captured = capsys.readouterr()
     assert f"# yaml-language-server: $schema={fake_schema}" in captured.out
@@ -74,8 +74,8 @@ def test_cli_config_template_gen_with_global_schema(tmp_path, capsys, monkeypatc
     assert f"Using installed JSON Schema at: {fake_schema}" in captured.out
 
 
-def test_cli_config_schema_cat(capsys):
-    code = main(["config", "schema", "cat"])
+def test_cli_config_schema_print(capsys):
+    code = main(["config", "schema", "print"])
     assert code == 0
     captured = capsys.readouterr()
     schema = json.loads(captured.out)
@@ -91,7 +91,7 @@ def test_cli_config_schema_gen(tmp_path):
 
 def test_cli_config_validate(tmp_path, capsys):
     valid_cfg = tmp_path / "valid.yaml"
-    cfg_text = "sync_freq_minutes: 5\nmappings:\n  - alias: m\n    path1: a\n    path2: b\n"
+    cfg_text = "sync_freq_minutes: 5\nmappings:\n  m:\n    path1: a\n    path2: b\n"
     valid_cfg.write_text(cfg_text)
 
     code = main(["config", "validate", str(valid_cfg)])
@@ -108,7 +108,7 @@ def test_cli_config_validate(tmp_path, capsys):
 def test_cli_config_show(tmp_path, capsys):
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
-        "sync_freq_minutes: 6\nmappings:\n  - alias: m\n    path1: a\n    path2: b\n"
+        "sync_freq_minutes: 6\nmappings:\n  m:\n    path1: a\n    path2: b\n"
     )
     with patch.dict(os.environ, {"RC_SYNC_CONFIG_PATH": str(cfg_file)}):
         code = main(["config", "show"])
@@ -120,7 +120,7 @@ def test_cli_config_show(tmp_path, capsys):
 def test_cli_status(tmp_path, capsys):
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
-        "sync_freq_minutes: 5\nmappings:\n  - alias: m\n    path1: a\n    path2: b\n"
+        "sync_freq_minutes: 5\nmappings:\n  m:\n    path1: a\n    path2: b\n"
     )
     with (
         patch.dict(
@@ -145,7 +145,7 @@ def test_cli_status(tmp_path, capsys):
 def test_cli_sync_invocation(tmp_path):
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
-        "sync_freq_minutes: 5\nmappings:\n  - alias: m\n    path1: a\n    path2: b\n"
+        "sync_freq_minutes: 5\nmappings:\n  m:\n    path1: a\n    path2: b\n"
     )
     with (
         patch.dict(

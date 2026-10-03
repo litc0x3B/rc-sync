@@ -155,7 +155,7 @@ class SyncEngine:
             ):
                 precond_msg = (
                     f"Initial resync precondition failed for alias '{mapping.alias}': "
-                    "both paths are non-empty and AllowResyncNonEmpty is false."
+                    "both paths are non-empty and allow_init_non_empty is false."
                 )
                 self._logger.error(
                     precond_msg,

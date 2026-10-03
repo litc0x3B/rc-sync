@@ -407,31 +407,22 @@ class DaemonManager:
             )
             return False
 
-        match = re.search(
-            r"^\s*(OnUnitInactiveSec|OnUnitActiveSec)\s*=\s*(\S+)", content, re.MULTILINE
-        )
+        match = re.search(r"^\s*OnUnitInactiveSec\s*=\s*(\S+)", content, re.MULTILINE)
         if not match:
             return False
 
-        param_name = match.group(1)
-        current_val = match.group(2).strip()
+        current_val = match.group(1).strip()
         target_val = f"{self.config.sync_freq_minutes}m"
 
-        if current_val == target_val and param_name == "OnUnitInactiveSec":
+        if current_val == target_val:
             return False
 
         new_content = re.sub(
-            r"^\s*(OnUnitInactiveSec|OnUnitActiveSec)\s*=.*$",
+            r"^\s*OnUnitInactiveSec\s*=.*$",
             f"OnUnitInactiveSec={target_val}",
             content,
             flags=re.MULTILINE,
         )
-        if "OnActiveSec" not in new_content:
-            new_content = re.sub(
-                r"(\[Timer\]\s*)",
-                r"\1OnBootSec=1m\nOnActiveSec=1m\n",
-                new_content,
-            )
         try:
             timer_path.write_text(new_content, encoding="utf-8")
         except (PermissionError, OSError) as e:

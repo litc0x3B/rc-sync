@@ -68,15 +68,12 @@ class StateManager:
             # If state file is corrupted or unreadable, start fresh
             return
 
-        raw_mappings: list[Any] = []
-        if isinstance(data, dict):
-            mappings_val = data.get("mappings", data.get("Mappings", []))
-            if isinstance(mappings_val, list):
-                raw_mappings = mappings_val
-            elif isinstance(mappings_val, dict):
-                raw_mappings = list(mappings_val.values())
-        elif isinstance(data, list):
-            raw_mappings = data
+        if not isinstance(data, dict):
+            return
+
+        raw_mappings = data.get("mappings")
+        if not isinstance(raw_mappings, list):
+            return
 
         for item in raw_mappings:
             if isinstance(item, dict):

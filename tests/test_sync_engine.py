@@ -7,7 +7,7 @@ from rc_sync.sync_engine import SyncEngine
 
 
 def test_sync_engine_unknown_alias(tmp_path):
-    cfg = Config(mappings=[MappingConfig(alias="docs", path1="/p1", path2="/p2")])
+    cfg = Config(mappings={"docs": MappingConfig(path1="/p1", path2="/p2")})
     sm = StateManager(tmp_path / "state.json")
     engine = SyncEngine(cfg, sm, lock_path=tmp_path / "test.lock")
 
@@ -18,14 +18,13 @@ def test_sync_engine_unknown_alias(tmp_path):
 def test_sync_engine_empty_precondition_failure(tmp_path):
     # Both paths non-empty and allow_init_non_empty=False
     cfg = Config(
-        mappings=[
-            MappingConfig(
-                alias="docs",
+        mappings={
+            "docs": MappingConfig(
                 path1="/p1",
                 path2="/p2",
                 allow_init_non_empty=False,
             )
-        ]
+        }
     )
     sm = StateManager(tmp_path / "state.json")
     engine = SyncEngine(cfg, sm, lock_path=tmp_path / "test.lock")
@@ -48,14 +47,13 @@ def test_sync_engine_empty_precondition_failure(tmp_path):
 
 def test_sync_engine_initial_resync_success(tmp_path):
     cfg = Config(
-        mappings=[
-            MappingConfig(
-                alias="docs",
+        mappings={
+            "docs": MappingConfig(
                 path1="/p1",
                 path2="/p2",
                 allow_init_non_empty=False,
             )
-        ]
+        }
     )
     sm = StateManager(tmp_path / "state.json")
     engine = SyncEngine(cfg, sm, lock_path=tmp_path / "test.lock")
@@ -87,10 +85,10 @@ def test_sync_engine_initial_resync_success(tmp_path):
 
 def test_sync_engine_sequential_batch(tmp_path):
     cfg = Config(
-        mappings=[
-            MappingConfig(alias="m1", path1="/p1", path2="/p2"),
-            MappingConfig(alias="m2", path1="/p3", path2="/p4"),
-        ]
+        mappings={
+            "m1": MappingConfig(path1="/p1", path2="/p2"),
+            "m2": MappingConfig(path1="/p3", path2="/p4"),
+        }
     )
     sm = StateManager(tmp_path / "state.json")
     # Mark m1 as already initialized
@@ -119,15 +117,14 @@ def test_sync_engine_initial_resync_uses_init_flags(tmp_path):
     cfg = Config(
         global_flags="--regular-only",
         global_flags_init="--global-init",
-        mappings=[
-            MappingConfig(
-                alias="docs",
+        mappings={
+            "docs": MappingConfig(
                 path1="/p1",
                 path2="/p2",
                 extra_flags_init="--mapping-init",
                 allow_init_non_empty=True,
             )
-        ],
+        },
     )
     sm = StateManager(tmp_path / "state.json")
     engine = SyncEngine(cfg, sm, lock_path=tmp_path / "test.lock")
@@ -155,16 +152,15 @@ def test_sync_engine_override_flags(tmp_path):
     cfg = Config(
         global_flags="--regular-global",
         global_flags_init="--global-init",
-        mappings=[
-            MappingConfig(
-                alias="docs",
+        mappings={
+            "docs": MappingConfig(
                 path1="/p1",
                 path2="/p2",
                 extra_flags="--only-mapping",
                 override_flags=True,
                 allow_init_non_empty=True,
             )
-        ],
+        },
     )
     sm = StateManager(tmp_path / "state.json")
     sm.update_status("/p1", "/p2", MappingStatus.SYNC_SUCCESS, init_success=True)
@@ -181,14 +177,13 @@ def test_sync_engine_override_flags(tmp_path):
 
 def test_sync_engine_reloads_state_after_lock(tmp_path):
     cfg = Config(
-        mappings=[
-            MappingConfig(
-                alias="docs",
+        mappings={
+            "docs": MappingConfig(
                 path1="/p1",
                 path2="/p2",
                 allow_init_non_empty=False,
             )
-        ]
+        }
     )
     state_file = tmp_path / "state.json"
     sm = StateManager(state_file)
@@ -213,14 +208,13 @@ def test_sync_engine_reloads_state_after_lock(tmp_path):
 
 def test_sync_engine_force_resync(tmp_path):
     cfg = Config(
-        mappings=[
-            MappingConfig(
-                alias="docs",
+        mappings={
+            "docs": MappingConfig(
                 path1="/p1",
                 path2="/p2",
                 allow_init_non_empty=False,
             )
-        ]
+        }
     )
     sm = StateManager(tmp_path / "state.json")
     sm.update_status("/p1", "/p2", MappingStatus.SYNC_SUCCESS, init_success=True)

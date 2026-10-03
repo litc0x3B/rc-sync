@@ -9,7 +9,7 @@ def test_daemon_generate_units(tmp_path):
     systemd_dir = tmp_path / "systemd" / "user"
     cfg = Config(
         sync_freq_minutes=15,
-        mappings=[MappingConfig(alias="docs", path1="p1", path2="p2")],
+        mappings={"docs": MappingConfig(path1="p1", path2="p2")},
     )
     sm = StateManager(tmp_path / "state.json")
     dm = DaemonManager(cfg, sm, systemd_dir=systemd_dir)
@@ -32,10 +32,10 @@ def test_daemon_generate_units(tmp_path):
 
 def test_format_status(tmp_path):
     cfg = Config(
-        mappings=[
-            MappingConfig(alias="docs", path1="~/Docs", path2="remote:Docs", enabled=True),
-            MappingConfig(alias="photos", path1="~/Photos", path2="remote:Photos", enabled=False),
-        ]
+        mappings={
+            "docs": MappingConfig(path1="~/Docs", path2="remote:Docs", enabled=True),
+            "photos": MappingConfig(path1="~/Photos", path2="remote:Photos", enabled=False),
+        }
     )
     sm = StateManager(tmp_path / "state.json")
     sm.update_status(
@@ -245,8 +245,7 @@ def test_sync_timer_frequency_updates_active_timer(tmp_path):
     systemd_dir = tmp_path / "systemd" / "user"
     systemd_dir.mkdir(parents=True)
     timer_path = systemd_dir / "rc-sync.timer"
-    # Test upgrading from legacy OnUnitActiveSec=5m
-    timer_path.write_text("[Timer]\nOnUnitActiveSec=5m\nPersistent=true\n")
+    timer_path.write_text("[Timer]\nOnUnitInactiveSec=5m\nPersistent=true\n")
 
     cfg = Config(sync_freq_minutes=15)
     sm = StateManager(tmp_path / "state.json")
@@ -258,8 +257,6 @@ def test_sync_timer_frequency_updates_active_timer(tmp_path):
 
         assert dm.sync_timer_frequency() is True
         assert "OnUnitInactiveSec=15m" in timer_path.read_text()
-        assert "OnActiveSec=1m" in timer_path.read_text()
-        assert "OnBootSec=1m" in timer_path.read_text()
         # Verify restart was called
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert ["systemctl", "--user", "daemon-reload"] in calls

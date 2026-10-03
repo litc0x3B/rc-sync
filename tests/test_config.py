@@ -67,11 +67,11 @@ def test_global_config_freq_validation():
     assert cfg.sync_freq_minutes == 3
 
 
-def test_global_config_unique_aliases():
-    m1 = MappingConfig(alias="docs", path1="a", path2="b")
-    m2 = MappingConfig(alias="docs", path1="c", path2="d")
-    with pytest.raises(ValidationError, match="Duplicate mapping alias"):
-        Config(mappings=[m1, m2])
+def test_config_rejects_list_format():
+    with pytest.raises(ValidationError):
+        Config.model_validate(
+            {"mappings": [{"alias": "docs", "path1": "a", "path2": "b"}]}
+        )
 
 
 def test_load_config_from_yaml(tmp_path):
@@ -82,7 +82,7 @@ rclone_path: /usr/local/bin/rclone
 global_flags: "--max-lock %tm"
 global_flags_init: "--fast-list"
 mappings:
-  - alias: books
+  books:
     path1: /home/user/books
     path2: remote:books
     extra_flags: "--verbose"
@@ -128,8 +128,8 @@ def test_config_empty_mapping_key():
     with pytest.raises(ValidationError, match="Mapping alias cannot be empty"):
         Config.model_validate({"mappings": {"": {"path1": "a", "path2": "b"}}})
 
-    with pytest.raises(ValidationError, match="non-empty 'alias'"):
-        Config.model_validate({"mappings": [{"alias": "  ", "path1": "a", "path2": "b"}]})
+    with pytest.raises(ValidationError, match="Mapping alias cannot be empty"):
+        Config.model_validate({"mappings": {"   ": {"path1": "a", "path2": "b"}}})
 
 
 def test_schema_and_template_generation(tmp_path, monkeypatch):

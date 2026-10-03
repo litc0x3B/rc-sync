@@ -59,10 +59,9 @@ class MappingConfig(BaseModel):
 
     _alias: str = PrivateAttr(default="")
 
-    def __init__(self, **data: Any):
-        alias = data.pop("alias", None)
+    def __init__(self, alias: str = "", **data: Any):
         super().__init__(**data)
-        if alias is not None:
+        if alias:
             self._alias = str(alias).strip()
 
     @property
@@ -115,34 +114,6 @@ class Config(BaseModel):
         description="Sync mappings keyed by alias",
     )
 
-    @field_validator("mappings", mode="before")
-    @classmethod
-    def coerce_mappings(cls, v: Any) -> Any:
-        """Coerce list-based mappings into dictionary keyed by alias for backward compatibility."""
-        if isinstance(v, list):
-            res: dict[str, Any] = {}
-            for item in v:
-                if isinstance(item, dict):
-                    alias = item.get("alias")
-                    if not alias or not str(alias).strip():
-                        raise ValueError("Each mapping in list must have a non-empty 'alias'")
-                    alias_str = str(alias).strip()
-                    if alias_str in res:
-                        raise ValueError(f"Duplicate mapping alias found: '{alias_str}'")
-                    item_copy = dict(item)
-                    item_copy.pop("alias", None)
-                    res[alias_str] = item_copy
-                elif isinstance(item, MappingConfig):
-                    alias_str = item.alias
-                    if not alias_str:
-                        raise ValueError("MappingConfig object must have an alias")
-                    if alias_str in res:
-                        raise ValueError(f"Duplicate mapping alias found: '{alias_str}'")
-                    res[alias_str] = item
-                else:
-                    raise ValueError(f"Expected mapping dict or MappingConfig, got {type(item)}")
-            return res
-        return v
 
     @field_validator("mappings")
     @classmethod

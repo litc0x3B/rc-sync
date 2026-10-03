@@ -402,15 +402,6 @@ def template_print() -> None:
     print(content, end="")
 
 
-@template_app.command(
-    "cat",
-    help="Print default configuration template to stdout (alias for print)",
-    hidden=True,
-)
-def template_cat() -> None:
-    template_print()
-
-
 @template_app.command("gen", help="Write default template and schema.json to configuration path")
 def template_gen() -> None:
     target = get_config_path()
@@ -430,11 +421,6 @@ def template_gen() -> None:
 @schema_app.command("print", help="Print JSON Schema to stdout")
 def schema_print() -> None:
     print(json.dumps(get_json_schema(), indent=2))
-
-
-@schema_app.command("cat", help="Print JSON Schema to stdout (alias for print)", hidden=True)
-def schema_cat() -> None:
-    schema_print()
 
 
 @schema_app.command("gen", help="Write JSON Schema to disk")
