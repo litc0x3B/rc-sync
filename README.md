@@ -159,6 +159,38 @@ rc-sync daemon remove
 
 ---
 
+### 4. State Management
+
+`rc-sync` tracks synchronization progress in `~/.local/state/rc-sync/state.json`. You can inspect or manually reset state entries:
+
+```bash
+# View recorded states
+rc-sync state show
+
+# View raw state JSON
+rc-sync state show --raw
+
+# Reset state for a mapping by alias (sets to INIT_PENDING, forcing initial resync on next run)
+rc-sync state reset docs
+
+# Reset state for all mappings
+rc-sync state reset all
+
+# Reset state for specific paths
+rc-sync state reset --path1 ~/Docs --path2 remote:Docs
+# or using positional paths:
+rc-sync state reset-paths ~/Docs remote:Docs
+
+# Completely delete a mapping record from state.json
+rc-sync state reset docs --remove
+rc-sync state reset-paths ~/Docs remote:Docs --remove
+
+# Clear all records from state.json
+rc-sync state clear
+```
+
+---
+
 ## Development & Testing
 
 ### Standard Environment

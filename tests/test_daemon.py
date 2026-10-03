@@ -327,8 +327,12 @@ def test_daemon_generate_units_skips_write_when_up_to_date(tmp_path):
     with patch.object(dm._logger, "info") as mock_info:
         dm.generate_units()
         calls = [c.args[0] for c in mock_info.call_args_list if c.args]
-        assert any("rc-sync.service already exists with desired configuration" in msg for msg in calls)
-        assert any("rc-sync.timer already exists with desired configuration" in msg for msg in calls)
+        assert any(
+            "rc-sync.service already exists with desired configuration" in msg for msg in calls
+        )
+        assert any(
+            "rc-sync.timer already exists with desired configuration" in msg for msg in calls
+        )
 
     assert service_p.stat().st_mtime_ns == mtime_service
     assert timer_p.stat().st_mtime_ns == mtime_timer

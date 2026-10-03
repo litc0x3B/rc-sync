@@ -144,7 +144,7 @@ mappings:
   docs:
     path1: ~/Docs
     path2: remote:Docs
-    enabled: true
+    enabled: false
     allow_init_non_empty: false
 """
 
@@ -184,7 +184,7 @@ mappings:
   docs:
     path1: ~/Docs
     path2: remote:Docs
-    enabled: true
+    enabled: false
     allow_init_non_empty: false
 """
 

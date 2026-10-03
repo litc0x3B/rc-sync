@@ -6,7 +6,6 @@ import tempfile
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -125,6 +124,58 @@ class StateManager:
     def all_states(self) -> list[MappingState]:
         """Return list of all recorded mapping states."""
         return list(self._states.values())
+
+    def _find_key(self, path1: str, path2: str) -> tuple[str, str] | None:
+        """Find matching key in _states, supporting both exact and tilde-expanded paths."""
+        norm_key = _normalize_key(path1, path2)
+        if norm_key in self._states:
+            return norm_key
+
+        exp_p1 = os.path.expanduser(path1.strip().rstrip("/"))
+        exp_p2 = os.path.expanduser(path2.strip().rstrip("/"))
+
+        for (k1, k2) in self._states.keys():
+            if os.path.expanduser(k1) == exp_p1 and os.path.expanduser(k2) == exp_p2:
+                return (k1, k2)
+        return None
+
+    def reset_state(self, path1: str, path2: str) -> MappingState:
+        """Reset state for (path1, path2) to INIT_PENDING, init_success=False."""
+        found_key = self._find_key(path1, path2)
+        target_key = found_key if found_key else _normalize_key(path1, path2)
+
+        state = MappingState(
+            path1=path1,
+            path2=path2,
+            init_success=False,
+            last_sync_time=None,
+            status=MappingStatus.INIT_PENDING,
+        )
+        self._states[target_key] = state
+        return state
+
+    def remove_state(self, path1: str, path2: str) -> bool:
+        """Remove mapping state entry if present."""
+        found_key = self._find_key(path1, path2)
+        if found_key and found_key in self._states:
+            del self._states[found_key]
+            return True
+        return False
+
+    def reset_all(self) -> None:
+        """Reset all recorded mapping states to INIT_PENDING with init_success=False."""
+        for key, state in list(self._states.items()):
+            self._states[key] = MappingState(
+                path1=state.path1,
+                path2=state.path2,
+                init_success=False,
+                last_sync_time=None,
+                status=MappingStatus.INIT_PENDING,
+            )
+
+    def clear_all(self) -> None:
+        """Clear all state entries completely."""
+        self._states.clear()
 
     def save(self) -> None:
         """Atomically persist state to disk."""

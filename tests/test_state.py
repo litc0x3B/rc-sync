@@ -52,3 +52,38 @@ def test_state_manager_never_deletes_entries(tmp_path):
     keys = {(s.path1, s.path2) for s in all_s}
     assert ("p1", "p2") in keys
     assert ("p3", "p4") in keys
+
+
+def test_state_manager_reset_and_remove(tmp_path):
+    state_file = tmp_path / "state.json"
+    manager = StateManager(state_file)
+    manager.update_status("~/Docs", "remote:Docs", MappingStatus.SYNC_SUCCESS, init_success=True)
+    manager.update_status("/other/p1", "/other/p2", MappingStatus.INIT_SUCCESS, init_success=True)
+    manager.save()
+
+    # Reset ~/Docs
+    manager.reset_state("~/Docs", "remote:Docs")
+    st = manager.get_state("~/Docs", "remote:Docs")
+    assert st.status == MappingStatus.INIT_PENDING
+    assert st.init_success is False
+    assert st.last_sync_time is None
+
+    # Other mapping remains untouched
+    st2 = manager.get_state("/other/p1", "/other/p2")
+    assert st2.status == MappingStatus.INIT_SUCCESS
+    assert st2.init_success is True
+
+    # Remove /other/p1
+    assert manager.remove_state("/other/p1", "/other/p2") is True
+    assert len(manager.all_states()) == 1
+
+    # Reset all
+    manager.update_status("~/Docs", "remote:Docs", MappingStatus.SYNC_SUCCESS, init_success=True)
+    manager.reset_all()
+    assert manager.get_state("~/Docs", "remote:Docs").init_success is False
+    assert manager.get_state("~/Docs", "remote:Docs").status == MappingStatus.INIT_PENDING
+
+    # Clear all
+    manager.clear_all()
+    assert len(manager.all_states()) == 0
+

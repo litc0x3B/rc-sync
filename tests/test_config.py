@@ -137,6 +137,7 @@ def test_schema_and_template_generation(tmp_path, monkeypatch):
     template = get_default_config_template()
     assert "# yaml-language-server: $schema=./schema.json" in template
     assert "sync_freq_minutes: 5" in template
+    assert "enabled: false" in template
 
     schema = get_json_schema()
     assert "properties" in schema

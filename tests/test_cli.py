@@ -247,26 +247,6 @@ def test_cli_rclone_passthrough():
         )
 
 
-def test_cli_config_template_print(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr("rc_sync.config.get_installed_schema_path", lambda: None)
-    monkeypatch.setattr("rc_sync.cli.get_installed_schema_path", lambda: None)
-    target_config = tmp_path / "cfg" / "config.yaml"
-    with patch.dict(os.environ, {"RC_SYNC_CONFIG_PATH": str(target_config)}):
-        code = main(["config", "template", "print"])
-        assert code == 0
-        captured = capsys.readouterr()
-        assert "# yaml-language-server: $schema=./schema.json" in captured.out
-        assert "sync_freq_minutes: 5" in captured.out
-
-
-def test_cli_config_schema_print(capsys):
-    code = main(["config", "schema", "print"])
-    assert code == 0
-    captured = capsys.readouterr()
-    schema = json.loads(captured.out)
-    assert schema["type"] == "object"
-
-
 def test_cli_daemon_print_service(capsys):
     code = main(["daemon", "print", "service"])
     assert code == 0
@@ -363,5 +343,77 @@ def test_cli_daemon_enable_disable_now(tmp_path):
 
         assert main(["daemon", "disable", "--now"]) == 0
         mock_disable.assert_called_once_with(now=True)
+
+
+def test_cli_state_commands(tmp_path, capsys):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        "mappings:\n  docs:\n    path1: ~/Docs\n    path2: remote:Docs\n"
+    )
+    state_file = tmp_path / "state.json"
+    state_data = {
+        "mappings": [
+            {
+                "path1": "~/Docs",
+                "path2": "remote:Docs",
+                "init_success": True,
+                "status": "SYNC_SUCCESS",
+                "last_sync_time": "2026-10-03T18:00:00",
+            }
+        ]
+    }
+    state_file.write_text(json.dumps(state_data))
+
+    env = {
+        "RC_SYNC_CONFIG_PATH": str(cfg_file),
+        "RC_SYNC_STATE_PATH": str(state_file),
+        "RC_SYNC_LOCK_PATH": str(tmp_path / "test.lock"),
+    }
+
+    with patch.dict(os.environ, env):
+        # 1. state show
+        assert main(["state", "show"]) == 0
+        captured = capsys.readouterr()
+        assert "=== Mappings State ===" in captured.out
+        assert "[docs]" in captured.out
+        assert "SYNC_SUCCESS" in captured.out
+
+        # 2. state show --raw
+        assert main(["state", "show", "--raw"]) == 0
+        captured_raw = capsys.readouterr()
+        assert '"init_success": true' in captured_raw.out
+
+        # 3. state reset docs
+        assert main(["state", "reset", "docs"]) == 0
+        saved = json.loads(state_file.read_text())
+        assert saved["mappings"][0]["init_success"] is False
+        assert saved["mappings"][0]["status"] == "INIT_PENDING"
+
+        # 4. state reset unknown alias
+        assert main(["state", "reset", "nonexistent"]) == 1
+
+        # 5. state reset-paths
+        state_data["mappings"][0]["init_success"] = True
+        state_data["mappings"][0]["status"] = "SYNC_SUCCESS"
+        state_file.write_text(json.dumps(state_data))
+
+        assert main(["state", "reset-paths", "~/Docs", "remote:Docs"]) == 0
+        saved = json.loads(state_file.read_text())
+        assert saved["mappings"][0]["init_success"] is False
+
+        # 6. state reset --path1 --path2
+        assert (
+            main(["state", "reset", "--path1", "~/Docs", "--path2", "remote:Docs", "--remove"])
+            == 0
+        )
+        saved = json.loads(state_file.read_text())
+        assert len(saved["mappings"]) == 0
+
+        # 7. state clear
+        state_file.write_text(json.dumps(state_data))
+        assert main(["state", "clear"]) == 0
+        saved = json.loads(state_file.read_text())
+        assert len(saved["mappings"]) == 0
+
 
 

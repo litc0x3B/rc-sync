@@ -22,6 +22,7 @@ from rc_sync.config import (
     write_template,
 )
 from rc_sync.daemon import DaemonManager
+from rc_sync.lock import ProcessLock
 from rc_sync.logger import get_logger, setup_logger
 from rc_sync.paths import get_config_path, get_installed_schema_path
 from rc_sync.state import StateManager
@@ -47,6 +48,13 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=True,
 )
+
+state_app = typer.Typer(
+    name="state",
+    help="Inspect and manage synchronization state",
+    no_args_is_help=True,
+)
+app.add_typer(state_app, name="state")
 
 daemon_app = typer.Typer(
     name="daemon",
@@ -330,7 +338,10 @@ def daemon_disable(
         raise typer.Exit(code=code)
 
 
-@daemon_app.command("start", help="Generate units if needed, reload daemon, and start timer in systemd")
+@daemon_app.command(
+    "start",
+    help="Generate units if needed, reload daemon, and start timer in systemd",
+)
 def daemon_start(
     exec_path: Annotated[
         str | None,
@@ -462,7 +473,243 @@ def schema_gen(
         raise typer.Exit(code=1) from e
 
 
-# 5. rclone (direct pass-through to rclone)
+# 5. state (show|reset|reset-paths|clear)
+@state_app.command("show", help="Show synchronization state records")
+def state_show(
+    raw: Annotated[bool, typer.Option("--raw", help="Output raw JSON state file")] = False,
+) -> None:
+    config, state_manager = _get_config_and_state(context="state")
+    if raw:
+        if state_manager.state_path.is_file():
+            sys.stdout.write(state_manager.state_path.read_text(encoding="utf-8") + "\n")
+        else:
+            sys.stdout.write('{"mappings": []}\n')
+        return
+
+    path_to_alias: dict[tuple[str, str], str] = {}
+    for m in config.mappings.values():
+        path_to_alias[(m.path1, m.path2)] = m.alias
+        path_to_alias[(m.path1.strip().rstrip("/"), m.path2.strip().rstrip("/"))] = m.alias
+
+    states = state_manager.all_states()
+    if not states:
+        sys.stdout.write("No state records found.\n")
+        return
+
+    lines = ["=== Mappings State ==="]
+    for s in states:
+        alias = path_to_alias.get((s.path1, s.path2)) or path_to_alias.get(
+            (s.path1.strip().rstrip("/"), s.path2.strip().rstrip("/"))
+        )
+        title = (
+            f"- [{alias}] ({s.path1} <-> {s.path2})"
+            if alias
+            else f"- ({s.path1} <-> {s.path2})"
+        )
+        status_str = s.status.value if hasattr(s.status, "value") else str(s.status)
+        lines.append(title)
+        lines.append(f"    Status:       {status_str}")
+        lines.append(f"    Init success: {'true' if s.init_success else 'false'}")
+        lines.append(f"    Last sync:    {s.last_sync_time or 'null'}")
+
+    sys.stdout.write("\n".join(lines) + "\n")
+
+
+@state_app.command(
+    "reset",
+    help="Reset state for mappings by alias, all, or specific paths (--path1/--path2)",
+)
+def state_reset(
+    targets: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Mapping aliases to reset, 'all', or two paths",
+            autocompletion=complete_alias,
+        ),
+    ] = None,
+    path1: Annotated[
+        str | None,
+        typer.Option("--path1", help="Path 1 of mapping to reset"),
+    ] = None,
+    path2: Annotated[
+        str | None,
+        typer.Option("--path2", help="Path 2 of mapping to reset"),
+    ] = None,
+    remove: Annotated[
+        bool,
+        typer.Option(
+            "--remove",
+            "--delete",
+            help="Remove state record completely instead of resetting to INIT_PENDING",
+        ),
+    ] = False,
+) -> None:
+    config, state_manager = _get_config_and_state(context="state")
+    logger = get_logger()
+
+    if path1 or path2:
+        if not path1 or not path2:
+            logger.error("Both --path1 and --path2 must be provided.", extra={"context": "state"})
+            raise typer.Exit(code=2)
+        with ProcessLock():
+            state_manager.load()
+            if remove:
+                removed = state_manager.remove_state(path1, path2)
+                state_manager.save()
+                if removed:
+                    logger.info(
+                        f"Removed state for paths '{path1}' <-> '{path2}'.",
+                        extra={"context": "state"},
+                    )
+                else:
+                    logger.info(
+                        f"No existing state found for paths '{path1}' <-> '{path2}'.",
+                        extra={"context": "state"},
+                    )
+            else:
+                state_manager.reset_state(path1, path2)
+                state_manager.save()
+                logger.info(
+                    f"Reset state for paths '{path1}' <-> '{path2}'.",
+                    extra={"context": "state"},
+                )
+        return
+
+    if not targets:
+        logger.error(
+            "No reset targets specified. Provide mapping aliases, 'all', or --path1 and --path2.",
+            extra={"context": "state"},
+        )
+        raise typer.Exit(code=2)
+
+    # Check if 2 targets were provided that are paths rather than aliases
+    if (
+        len(targets) == 2
+        and any(t not in config.mappings for t in targets)
+        and any("/" in t or ":" in t or "~" in t for t in targets)
+    ):
+        p1, p2 = targets[0], targets[1]
+        with ProcessLock():
+            state_manager.load()
+            if remove:
+                removed = state_manager.remove_state(p1, p2)
+                state_manager.save()
+                if removed:
+                    logger.info(
+                        f"Removed state for paths '{p1}' <-> '{p2}'.",
+                        extra={"context": "state"},
+                    )
+                else:
+                    logger.info(
+                        f"No existing state found for paths '{p1}' <-> '{p2}'.",
+                        extra={"context": "state"},
+                    )
+            else:
+                state_manager.reset_state(p1, p2)
+                state_manager.save()
+                logger.info(
+                    f"Reset state for paths '{p1}' <-> '{p2}'.",
+                    extra={"context": "state"},
+                )
+        return
+
+    if "all" in targets:
+        with ProcessLock():
+            state_manager.load()
+            if remove:
+                state_manager.clear_all()
+                state_manager.save()
+                logger.info("Removed all mapping states.", extra={"context": "state"})
+            else:
+                for m in config.mappings.values():
+                    state_manager.reset_state(m.path1, m.path2)
+                state_manager.reset_all()
+                state_manager.save()
+                logger.info("Reset state for all mappings.", extra={"context": "state"})
+        return
+
+    unknown = [a for a in targets if a not in config.mappings]
+    if unknown:
+        for a in unknown:
+            logger.error(
+                f"Mapping alias '{a}' not found in configuration.",
+                extra={"context": "state"},
+            )
+        raise typer.Exit(code=1)
+
+    with ProcessLock():
+        state_manager.load()
+        for a in targets:
+            m = config.mappings[a]
+            if remove:
+                state_manager.remove_state(m.path1, m.path2)
+                logger.info(
+                    f"Removed state for mapping '{a}' ({m.path1} <-> {m.path2}).",
+                    extra={"context": "state"},
+                )
+            else:
+                state_manager.reset_state(m.path1, m.path2)
+                logger.info(
+                    f"Reset state for mapping '{a}' ({m.path1} <-> {m.path2}).",
+                    extra={"context": "state"},
+                )
+        state_manager.save()
+
+
+@state_app.command(
+    "reset-paths",
+    help="Reset state for a specific pair of paths (path1, path2)",
+)
+def state_reset_paths(
+    path1: Annotated[str, typer.Argument(..., help="Path 1 of mapping")],
+    path2: Annotated[str, typer.Argument(..., help="Path 2 of mapping")],
+    remove: Annotated[
+        bool,
+        typer.Option(
+            "--remove",
+            "--delete",
+            help="Remove state record completely instead of resetting to INIT_PENDING",
+        ),
+    ] = False,
+) -> None:
+    config, state_manager = _get_config_and_state(context="state")
+    logger = get_logger()
+    with ProcessLock():
+        state_manager.load()
+        if remove:
+            removed = state_manager.remove_state(path1, path2)
+            state_manager.save()
+            if removed:
+                logger.info(
+                    f"Removed state for paths '{path1}' <-> '{path2}'.",
+                    extra={"context": "state"},
+                )
+            else:
+                logger.info(
+                    f"No existing state found for paths '{path1}' <-> '{path2}'.",
+                    extra={"context": "state"},
+                )
+        else:
+            state_manager.reset_state(path1, path2)
+            state_manager.save()
+            logger.info(
+                f"Reset state for paths '{path1}' <-> '{path2}'.",
+                extra={"context": "state"},
+            )
+
+
+@state_app.command("clear", help="Clear all state entries from state.json")
+def state_clear() -> None:
+    config, state_manager = _get_config_and_state(context="state")
+    logger = get_logger()
+    with ProcessLock():
+        state_manager.load()
+        state_manager.clear_all()
+        state_manager.save()
+        logger.info("Cleared all state records.", extra={"context": "state"})
+
+
+# 6. rclone (direct pass-through to rclone)
 def handle_rclone(args: Sequence[str]) -> int:
     """Pass command and arguments directly to rclone."""
     config_path = get_config_path()
