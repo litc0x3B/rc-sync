@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rc_sync.config import Config
 from rc_sync.logger import get_logger, set_trigger_mode
-from rc_sync.paths import get_systemd_user_dir
+from rc_sync.paths import get_config_path, get_systemd_user_dir
 from rc_sync.state import StateManager
 from rc_sync.sync_engine import SyncEngine
 
@@ -78,6 +78,107 @@ class DaemonManager:
             freq=self.config.sync_freq_minutes,
         )
 
+    def _is_service_content_equivalent(
+        self,
+        existing: str,
+        exec_path: str | None = None,
+    ) -> bool:
+        """Check if existing rc-sync.service is functionally equivalent to rendered unit."""
+        if "Type=oneshot" not in existing or "SyslogIdentifier=rc-sync" not in existing:
+            return False
+        if 'Environment="RC_SYNC_TRIGGER=systemd"' not in existing:
+            return False
+
+        exec_match = re.search(r"^\s*ExecStart=(.*?)\s*$", existing, re.MULTILINE)
+        if not exec_match:
+            return False
+
+        exec_cmd = exec_match.group(1).strip()
+        if not exec_cmd.endswith("sync all"):
+            return False
+
+        bin_part = exec_cmd[:-len("sync all")].strip()
+
+        if exec_path:
+            expected_bin = exec_path
+        elif binary := shutil.which("rc-sync"):
+            expected_bin = binary
+        else:
+            expected_bin = sys.executable
+
+        try:
+            if expected_bin == sys.executable:
+                if not (bin_part.startswith(sys.executable) and "-m rc_sync.cli" in bin_part):
+                    return False
+            else:
+                if Path(bin_part).resolve() != Path(expected_bin).resolve():
+                    return False
+        except Exception:
+            return False
+
+        cfg_match = re.search(
+            r'^\s*Environment="RC_SYNC_CONFIG_PATH=(.*?)"\s*$', existing, re.MULTILINE
+        )
+        if cfg_match:
+            cfg_path_in_unit = cfg_match.group(1).strip().strip('"')
+            try:
+                if Path(cfg_path_in_unit).resolve() != get_config_path().resolve():
+                    return False
+            except Exception:
+                return False
+
+        return True
+
+    def _is_unit_up_to_date(
+        self,
+        path: Path,
+        desired_content: str,
+        unit_type: str,
+        exec_path: str | None = None,
+    ) -> bool:
+        """Check if existing unit file already has the desired configuration."""
+        if not path.exists():
+            return False
+
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except Exception:
+            return False
+
+        if existing.strip() == desired_content.strip():
+            return True
+
+        if unit_type == "service":
+            return self._is_service_content_equivalent(existing, exec_path=exec_path)
+
+        return False
+
+    def _write_unit_if_needed(
+        self,
+        path: Path,
+        content: str,
+        unit_type: str,
+        exec_path: str | None = None,
+    ) -> bool:
+        """Write unit content if file does not exist or differs from desired content.
+
+        Returns True if file was written/updated, False if already up-to-date.
+        Raises OSError/PermissionError if writing is required but fails.
+        """
+        if self._is_unit_up_to_date(path, content, unit_type, exec_path=exec_path):
+            self._logger.info(
+                f"{path.name} already exists with desired configuration.",
+                extra={"context": "daemon"},
+            )
+            return False
+
+        path.write_text(content, encoding="utf-8")
+        self._logger.info(
+            f"Generated {path.name} in {self.systemd_dir}",
+            extra={"context": "daemon"},
+        )
+        return True
+
     def generate_units(self, exec_path: str | None = None) -> tuple[Path, Path]:
         """Generate rc-sync.service and rc-sync.timer in systemd user directory."""
         self.systemd_dir.mkdir(parents=True, exist_ok=True)
@@ -85,20 +186,16 @@ class DaemonManager:
         service_path = self.systemd_dir / "rc-sync.service"
         timer_path = self.systemd_dir / "rc-sync.timer"
 
-        for p in (service_path, timer_path):
-            if p.exists() and not os.access(p, os.W_OK):
-                raise PermissionError(f"{p} is read-only")
-
         service_content = self.render_service_unit(exec_path=exec_path)
         timer_content = self.render_timer_unit()
 
-        service_path.write_text(service_content, encoding="utf-8")
-        timer_path.write_text(timer_content, encoding="utf-8")
-
-        self._logger.info(
-            f"Generated systemd user units in {self.systemd_dir}",
-            extra={"context": "daemon"},
+        self._write_unit_if_needed(
+            service_path, service_content, unit_type="service", exec_path=exec_path
         )
+        self._write_unit_if_needed(
+            timer_path, timer_content, unit_type="timer", exec_path=exec_path
+        )
+
         return service_path, timer_path
 
     def daemon_reload(self) -> int:
@@ -138,23 +235,6 @@ class DaemonManager:
         """Stop and disable timer, remove unit files, and reload systemd user daemon."""
         service_path = self.systemd_dir / "rc-sync.service"
         timer_path = self.systemd_dir / "rc-sync.timer"
-
-        # Check permissions: if parent directory is not writable, removal will fail
-        if self.systemd_dir.exists() and not os.access(self.systemd_dir, os.W_OK):
-            self._logger.error(
-                f"Cannot remove unit files: directory {self.systemd_dir} is read-only.",
-                extra={"context": "daemon"},
-            )
-            return 1
-
-        # Check permissions: files themselves must not be write-protected (read-only)
-        for p in (service_path, timer_path):
-            if p.exists() and not os.access(p, os.W_OK):
-                self._logger.error(
-                    f"Cannot remove unit file {p}: file is write-protected (read-only).",
-                    extra={"context": "daemon"},
-                )
-                return 1
 
         # Stop and disable timer
         cmd = ["systemctl", "--user", "disable", "--now", "rc-sync.timer"]
@@ -198,10 +278,11 @@ class DaemonManager:
         try:
             self.generate_units(exec_path=exec_path)
         except (PermissionError, OSError) as e:
-            self._logger.warning(
-                f"Cannot overwrite systemd units ({e}): proceeding with existing units.",
+            self._logger.error(
+                f"Cannot install systemd units: {e}",
                 extra={"context": "daemon"},
             )
+            return 1
 
         code = self.daemon_reload()
         if code != 0:
@@ -271,15 +352,6 @@ class DaemonManager:
         target_val = f"{self.config.sync_freq_minutes}m"
 
         if current_val == target_val and param_name == "OnUnitInactiveSec":
-            return False
-
-        # If read-only, warn and skip
-        if not os.access(timer_path, os.W_OK):
-            self._logger.warning(
-                f"Timer freq in config ({target_val}) differs from installed ({current_val}), "
-                f"but {timer_path} is read-only. Skipping update.",
-                extra={"context": "daemon"},
-            )
             return False
 
         new_content = re.sub(
@@ -368,10 +440,11 @@ class DaemonManager:
         try:
             self.generate_units(exec_path=exec_path)
         except (PermissionError, OSError) as e:
-            self._logger.warning(
-                f"Cannot overwrite systemd units ({e}): proceeding with existing units.",
+            self._logger.error(
+                f"Cannot install systemd units: {e}",
                 extra={"context": "daemon"},
             )
+            return 1
 
         code = self.daemon_reload()
         if code != 0:

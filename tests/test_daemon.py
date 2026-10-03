@@ -154,7 +154,7 @@ def test_daemon_remove_readonly_error(tmp_path):
         systemd_dir.chmod(0o755)
 
 
-def test_daemon_remove_write_protected_file_error(tmp_path):
+def test_daemon_remove_write_protected_file_succeeds_in_writable_dir(tmp_path):
     systemd_dir = tmp_path / "systemd" / "user"
     systemd_dir.mkdir(parents=True)
     cfg = Config()
@@ -165,12 +165,11 @@ def test_daemon_remove_write_protected_file_error(tmp_path):
     timer_path.write_text("dummy")
     timer_path.chmod(0o444)
 
-    try:
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            assert dm.remove() == 1
-    finally:
-        timer_path.chmod(0o644)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        # In POSIX, unlinking a write-protected file in a writable directory succeeds
+        assert dm.remove() == 0
+        assert not timer_path.exists()
 
 
 def test_daemon_writable_symlink_supported(tmp_path):
@@ -304,3 +303,73 @@ def test_daemon_generate_units_with_exec_path(tmp_path):
     service_p, timer_p = dm.generate_units(exec_path="/nix/store/test-rc-sync/bin/rc-sync")
     service_content = service_p.read_text()
     assert "ExecStart=/nix/store/test-rc-sync/bin/rc-sync sync all" in service_content
+
+
+def test_daemon_generate_units_skips_write_when_up_to_date(tmp_path):
+    systemd_dir = tmp_path / "systemd" / "user"
+    cfg = Config(sync_freq_minutes=10)
+    sm = StateManager(tmp_path / "state.json")
+    dm = DaemonManager(cfg, sm, systemd_dir=systemd_dir)
+
+    service_p, timer_p = dm.generate_units()
+    mtime_service = service_p.stat().st_mtime_ns
+    mtime_timer = timer_p.stat().st_mtime_ns
+
+    # Call again without changing config - files should not be rewritten
+    with patch.object(dm._logger, "info") as mock_info:
+        dm.generate_units()
+        calls = [c.args[0] for c in mock_info.call_args_list if c.args]
+        assert any("rc-sync.service already exists with desired configuration" in msg for msg in calls)
+        assert any("rc-sync.timer already exists with desired configuration" in msg for msg in calls)
+
+    assert service_p.stat().st_mtime_ns == mtime_service
+    assert timer_p.stat().st_mtime_ns == mtime_timer
+
+
+def test_daemon_enable_succeeds_when_units_are_readonly_but_up_to_date(tmp_path):
+    systemd_dir = tmp_path / "systemd" / "user"
+    cfg = Config(sync_freq_minutes=10)
+    sm = StateManager(tmp_path / "state.json")
+    dm = DaemonManager(cfg, sm, systemd_dir=systemd_dir)
+
+    # Initial generation
+    service_p, timer_p = dm.generate_units()
+
+    # Make them read-only (simulate Home Manager / Nix store permissions)
+    service_p.chmod(0o444)
+    timer_p.chmod(0o444)
+
+    try:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            # enable succeeds without trying to write to read-only files
+            assert dm.enable() == 0
+            # up succeeds without trying to write to read-only files
+            with patch("rc_sync.daemon.SyncEngine.sync", return_value=0):
+                assert dm.up() == 0
+    finally:
+        service_p.chmod(0o644)
+        timer_p.chmod(0o644)
+
+
+def test_daemon_enable_and_up_fail_when_unit_needs_changes_and_is_readonly(tmp_path):
+    systemd_dir = tmp_path / "systemd" / "user"
+    cfg = Config(sync_freq_minutes=10)
+    sm = StateManager(tmp_path / "state.json")
+    dm = DaemonManager(cfg, sm, systemd_dir=systemd_dir)
+
+    service_p, timer_p = dm.generate_units()
+
+    # Outdated timer content that doesn't match config (e.g. 5m vs 10m) and is read-only
+    timer_p.write_text("[Timer]\nOnUnitInactiveSec=5m\n")
+    timer_p.chmod(0o444)
+
+    try:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            # Fails with exit code 1 because changes were actually needed and could not be written
+            assert dm.enable() == 1
+            assert dm.up() == 1
+    finally:
+        timer_p.chmod(0o644)
+
