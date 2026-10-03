@@ -1,0 +1,101 @@
+{
+  "$defs": {
+    "MappingConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for an individual sync mapping.",
+      "properties": {
+        "path1": {
+          "description": "First path (local or remote)",
+          "title": "Path1",
+          "type": "string"
+        },
+        "path2": {
+          "description": "Second path (local or remote)",
+          "title": "Path2",
+          "type": "string"
+        },
+        "extra_flags": {
+          "default": "",
+          "description": "Additional flags passed to rclone during regular sync",
+          "title": "Extra Flags",
+          "type": "string"
+        },
+        "override_flags": {
+          "default": false,
+          "description": "Ignore global flags during regular sync",
+          "title": "Override Flags",
+          "type": "boolean"
+        },
+        "extra_flags_init": {
+          "default": "",
+          "description": "Additional flags applied ONLY during automatic initial resync",
+          "title": "Extra Flags Init",
+          "type": "string"
+        },
+        "override_flags_init": {
+          "default": false,
+          "description": "Ignore global initial flags ONLY during automatic initial resync",
+          "title": "Override Flags Init",
+          "type": "boolean"
+        },
+        "allow_init_non_empty": {
+          "default": false,
+          "description": "Ignore mandatory condition that at least one path is empty for initial resync",
+          "title": "Allow Init Non Empty",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether this mapping is active",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path1",
+        "path2"
+      ],
+      "title": "MappingConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Global configuration for rc-sync.",
+  "properties": {
+    "global_flags": {
+      "default": "--resilient --recover --max-lock %tm",
+      "description": "Global extra arguments passed to rclone (%t replaced by sync_freq_minutes)",
+      "title": "Global Flags",
+      "type": "string"
+    },
+    "global_flags_init": {
+      "default": "",
+      "description": "Global initial arguments passed to rclone during initial sync (%t replaced by sync_freq_minutes)",
+      "title": "Global Flags Init",
+      "type": "string"
+    },
+    "rclone_path": {
+      "default": "rclone",
+      "description": "Command or executable path for rclone",
+      "title": "Rclone Path",
+      "type": "string"
+    },
+    "sync_freq_minutes": {
+      "default": 5,
+      "description": "Sync frequency in minutes (must be >= 3)",
+      "minimum": 3,
+      "title": "Sync Freq Minutes",
+      "type": "integer"
+    },
+    "mappings": {
+      "additionalProperties": {
+        "$ref": "#/$defs/MappingConfig"
+      },
+      "description": "Sync mappings keyed by alias",
+      "title": "Mappings",
+      "type": "object"
+    }
+  },
+  "title": "Config",
+  "type": "object"
+}

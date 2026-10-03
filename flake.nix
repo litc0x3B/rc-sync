@@ -29,6 +29,13 @@
           type = "app";
           program = "${self.packages.${system}.default}/bin/rc-sync";
         };
+        sandbox = {
+          type = "app";
+          program = "${pkgs.writeShellScriptBin "rc-sync-sandbox" ''
+            export PATH="${self.packages.${system}.default}/bin:${pkgs.coreutils}/bin:${pkgs.bashInteractive}/bin:${pkgs.rclone}/bin:$PATH"
+            exec ${./scripts/sandbox.sh} "$@"
+          ''}/bin/rc-sync-sandbox";
+        };
       });
 
       devShells = forAllSystems (pkgs: system: {
@@ -38,6 +45,7 @@
               pydantic
               pyyaml
               platformdirs
+              typer
               pytest
               mypy
               types-pyyaml
@@ -52,5 +60,8 @@
       overlays.default = final: prev: {
         rc-sync = final.callPackage ./default.nix {};
       };
+
+      homeManagerModules.default = import ./nix/hm-module.nix self;
+      homeManagerModules.rc-sync = self.homeManagerModules.default;
     };
 }

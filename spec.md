@@ -9,33 +9,35 @@
 
 ## Концептуальная модель данных
 ### Конфигурация конкретного маппинга
-- Alias
-- Path1
-- Path2
-- ExtraFlags - дополнительные флаги, которые передаются rclone при обычной синхронизации
-- OverrideFlags - флаги, которые оверрайдят глобальные при обычной синхронизации
-- ExtraFlagsInit - дополнительные флаги rclone, применяемые ТОЛЬКО при автоматическом первичном resync (когда InitSuccess == false), конфликтует с OverrideFlagsInit
-- OverrideFlagsInit - флаги rclone, оверрайдят глобальные ТОЛЬКО при автоматическом первичном resync (когда InitSuccess == false), конфликтует с ExtraFlagsInit
-- AllowResyncNonEmpty - игнорировать обязательное условие для начального resync^ (default = false)
-- Enabled (default = true)
+- alias - идентификатор маппинга (в YAML и Nix задаётся как ключ в словаре `mappings: <alias>: ...`; для обратной совместимости также поддерживается список с полем `alias`)
+- path1 - первый путь (локальный или удалённый)
+- path2 - второй путь (локальный или удалённый)
+- extra_flags - дополнительные флаги, которые передаются rclone при обычной синхронизации (default = "")
+- override_flags - игнорировать глобальные флаги при обычной синхронизации (boolean, default = false)
+- extra_flags_init - дополнительные флаги rclone, применяемые ТОЛЬКО при автоматическом первичном resync (когда init_success == false) (default = "")
+- override_flags_init - игнорировать глобальные флаги ТОЛЬКО при автоматическом первичном resync (когда init_success == false) (boolean, default = false)
+- allow_init_non_empty - игнорировать обязательное условие для начального resync^ (default = false)
+- enabled (default = true)
 
 ### Глобальная конфигурация
-- ExtraFlags - дополнительные аргументы, которые передаются rclone.  (default = "--resilient --recover --max-lock %tm")
-- RclonePath - команда для вызова rclone. (default = "rclone")
-- SyncFreqMinutes - Частота синхронизации в минутах. Обязательно >= 3
+- global_flags - аргументы, которые передаются rclone при обычной синхронизации. (default = "--resilient --recover --max-lock %tm")
+- global_flags_init - аргументы, которые передаются rclone при автоматическом первичном resync. (default = "")
+- rclone_path - команда для вызова rclone. (default = "rclone")
+- sync_freq_minutes - Частота синхронизации в минутах. Обязательно >= 3
+- mappings - словарь конфигураций маппингов, индексированный по alias (в YAML: `mappings: <alias>: { path1: ..., path2: ... }`). Поддерживает валидацию уникальности алиасов и 100% автодополнение в Nix (`services.rc-sync.settings.mappings.<name>.*`). Для обратной совместимости парсер автоматически преобразует старый формат списка (`- alias: ...`) в словарь.
 
 ### Состояние маппинга
-- Path1
-- Path2
-- InitSuccess - был ли проведён УСПЕШНЫЙ resync в первый раз (default = false)
-- LastSyncTime - время последней попытки синхронизации (ISO 8601, null до первого запуска)
-- Status - текущий статус маппинга (default = INIT_PENDING), одно из значений:
+- path1
+- path2
+- init_success - был ли проведён УСПЕШНЫЙ resync в первый раз (default = false)
+- last_sync_time - время последней попытки синхронизации (ISO 8601, null до первого запуска)
+- status - текущий статус маппинга (default = INIT_PENDING), одно из значений:
   - `INIT_PENDING` (начальное состояние нового маппинга до первой синхронизации)
   - `INIT_FAILED` (первичный resync завершился с ошибкой)
   - `INIT_SUCCESS` (первичный resync успешно завершен)
   - `SYNC_SUCCESS` (очередная регулярная синхронизация завершилась успешно)
   - `SYNC_FAILED` (регулярная синхронизация завершилась с ошибкой)
-- Маппинг в файле состояния однозначно идентифицируется связкой путей (Path1, Path2)
+- Маппинг в файле состояния однозначно идентифицируется связкой путей (path1, path2)
 - Управление состоянием инкапсулируется в отдельный класс с методами для обновления внутренних полей и сохранения файла состояния
 
 ## Команды и переменные окружения
@@ -46,19 +48,23 @@
      - Состояние: `platformdirs.user_state_path("rc-sync") / "state.json"` (`~/.local/state/rc-sync/state.json`).
    - Файл конфигурации считается неизменяемым (read-only, для совместимости со средой Nix). Формат конфигурации — YAML, валидация структуры выполняется через Pydantic.
 2. Команды (интерфейс CLI и сообщения программы на английском языке):
-   1. `sync (<alias>+|all) [--resync] [--override-flags] [<extra-flags>]` - запуск синхронизации указанных маппингов (или всех активных)
+   1. `sync (<alias>+|all) [--override-flags] [<extra-flags>]` - запуск синхронизации указанных маппингов (или всех активных)
    2. `status` - отображение статуса демона (вывод `systemctl status` таймера и службы, если они существуют) и текущего статуса всех маппингов на основе файла состояния
    3. `daemon`:
-      - `daemon up` - генерация юнитов systemd, включение таймера и немедленный запуск первой синхронизации с выводом в терминал
-      - `daemon enable` - генерация юнитов и включение таймера в systemd
+      - `daemon print (service|timer) [--exec-path <path>]` - вывод отрендеренного содержимого юнита systemd (service или timer) в stdout (с опциональным явным заданием пути к бинарнику для ExecStart)
+      - `daemon up [--exec-path <path>]` - генерация юнитов systemd, включение таймера и немедленный запуск первой синхронизации с выводом в терминал
+      - `daemon install [--exec-path <path>]` - генерация юнитов systemd и перезагрузка systemd daemon без автоматического включения/запуска таймера
+      - `daemon enable [--exec-path <path>]` - генерация юнитов, включение и запуск таймера в systemd
       - `daemon disable` - отключение и остановка таймера в systemd
+      - `daemon remove` - остановка и отключение таймера, удаление файлов юнитов из systemd и перезагрузка демона
       - `daemon logs [-f]` - просмотр логов демона через journalctl (с флагом -f для стриминга)
+       - Автоматическая актуализация таймера: при вызове `sync` (включая запуск по таймеру) или `status`, если юнит `rc-sync.timer` уже существует, проверяется совпадение `OnUnitInactiveSec` (или устаревшего `OnUnitActiveSec`) со значением `sync_freq_minutes` из конфигурации. При несовпадении таймер обновляется и перезапускается (`[INFO] [daemon] Updated timer frequency from ... to ...`). Если файл таймера защищён от записи (read-only, например, указывает на Nix store), выводится предупреждение (`[WARN]`) и изменение пропускается. Если же попытка записи/удаления происходит во время явных команд `daemon install` или `daemon remove`, отсутствие прав считается ошибкой (`[ERROR]`) с кодом 1.
    4. `config`:
       - `config validate [<configPath>]` - проверка валидности структуры YAML-конфигурации через Pydantic
       - `config show` - вывод распарсенной конфигурации со всеми примененными дефолтными значениями
-      - `config template cat` - вывод дефолтного YAML-конфига с примером и заголовком схемы (`# yaml-language-server: $schema=...`) в stdout
-      - `config template gen` - запись дефолтного шаблона конфигурации в целевой путь (`RC_SYNC_CONFIG_PATH`), если файл ещё не существует (также создает `schema.json` рядом). Если файл уже существует или отсутствуют права на запись — завершение с ошибкой
-      - `config schema cat` - вывод JSON Schema конфигурации (сгенерированной Pydantic) в stdout
+      - `config template print` (алиас: `cat`) - вывод дефолтного YAML-конфига с примером и заголовком схемы (`# yaml-language-server: $schema=...`) в stdout (использует путь к глобальной схеме при наличии, иначе генерирует `schema.json` рядом с файлом конфигурации)
+      - `config template gen` - запись дефолтного шаблона конфигурации в целевой путь (`RC_SYNC_CONFIG_PATH`), если файл ещё не существует (использует глобальную схему при наличии, иначе генерирует `schema.json` рядом). Если файл уже существует или отсутствуют права на запись — завершение с ошибкой
+      - `config schema print` (алиас: `cat`) - вывод JSON Schema конфигурации (сгенерированной Pydantic) в stdout
       - `config schema gen [<outputPath>]` - запись файла `schema.json` на диск (по умолчанию — рядом с файлом конфигурации, либо по указанному пути для пакетных менеджеров)
 
 ### Взаимодействие программы с rclone:
@@ -76,22 +82,22 @@
 
 ## Поведение, ограничения, краевые случаи
 
-- Внутри всех строк для флагов можно использовать %t - значение SyncFreqMinutes, % нужно экранировать чтобы он не считался спец символом (%%).
+- Внутри всех строк для флагов можно использовать %t - значение sync_freq_minutes, % нужно экранировать чтобы он не считался спец символом (%%).
 - Алгоритм комбинирования флагов:
   - Если передан override-флаг в CLI (`--override-flags`), то используются ТОЛЬКО переданные CLI extra-флаги.
   - Иначе:
-    - При автоматическом начальном resync (`InitSuccess == false`):
-      - Если у маппинга задан `OverrideFlagsInit`, берутся `OverrideFlagsInit + CLI extraFlags` (глобальный ExtraFlags игнорируется).
-      - Иначе: `Global ExtraFlags + Mapping ExtraFlagsInit + CLI extraFlags`.
-    - При обычной синхронизации или ручном вызове с `--resync`:
-      - Флаги `*Init` игнорируются (при ручном `--resync` пользователь сам задает нужные флаги через аргументы CLI).
-      - Если у маппинга задан `OverrideFlags`, берутся `OverrideFlags + CLI extraFlags` (глобальный ExtraFlags игнорируется).
-      - Иначе: `Global ExtraFlags + Mapping ExtraFlags + CLI extraFlags`.
-  - СLI extraFlags и Global ExtraFlags применяются ко всем участвующим в синхронизации маппингам.
+    - При автоматическом начальном resync (`init_success == false`):
+      - Если у маппинга `override_flags_init == true`, берутся `Mapping extra_flags_init + CLI extra_flags` (глобальный global_flags_init игнорируется).
+      - Иначе: `global_flags_init + Mapping extra_flags_init + CLI extra_flags`.
+    - При обычной синхронизации или ручном вызове:
+      - Флаги `*init` игнорируются.
+      - Если у маппинга `override_flags == true`, берутся `Mapping extra_flags + CLI extra_flags` (глобальный global_flags игнорируется).
+      - Иначе: `global_flags + Mapping extra_flags + CLI extra_flags`.
+  - СLI extra_flags и global_flags / global_flags_init применяются ко всем участвующим в синхронизации маппингам.
 - ^ обязательное условие начального resync - один из path1 и path2 должен быть пустым (случай, когда оба пути пустые, также считается валидным). Проверка содержимого выполняется через `rclone lsf`. Если оба пути не пустые и AllowResyncNonEmpty == false, попытка синхронизации прерывается с понятным сообщением об ошибке.
 - В случае если одного из путей path1 и path2 не существует, то он должен быть создан с помощью `rclone mkdir` (работает рекурсивно как mkdir -p и для локальных, и для удалённых путей).
 - path1 и path2 равноправные и могут вести как на локальное так и на глобальное хранилище
-- если InitSuccess == false или в команде sync установлен флаг --resync, то rclone bisync вызывается с аргументом --resync
+- если InitSuccess == false, то rclone bisync вызывается с аргументом --resync
 - При синхронизации нескольких маппингов (или all) они выполняются последовательно (по очереди). Ошибка синхронизации одного маппинга не прерывает выполнение остальных.
 - Используется единая глобальная межпроцессная блокировка на базе `fcntl.flock`:
   - Lock-файл размещается по пути `platformdirs.user_runtime_path("rc-sync") / "rc-sync.lock"` (в `XDG_RUNTIME_DIR`).
@@ -99,6 +105,12 @@
   - Если блокировка уже занята другим процессом, ожидающий процесс выводит информационное сообщение в stdout (например: `[INFO] Синхронизация уже выполняется процессом PID <pid> (<command>). Ожидание освобождения...`) и ожидает освобождения без таймаута (до завершения или прерывания по `Ctrl+C`).
   - Блокировка автоматически освобождается ядром ОС при штатном или аварийном завершении удерживающего процесса.
 - Ведётся лог в stdout, все сообщения rclone должны выводится туда же.
+- **Принцип работы с файлами и правами доступа (отсутствие проверок на симлинки):**
+  - Программа никогда не проверяет факт наличия символических ссылок (`is_symlink`) и не ограничивает работу с ними.
+  - Все проверки возможности записи, изменения или удаления файлов и каталогов (файла конфигурации, юнитов systemd) выполняются исключительно по фактической доступности на запись (read-only vs writable) через `os.access(..., os.W_OK)` и перехват системных ошибок (`PermissionError`/`OSError`).
+  - Благодаря этому:
+    - Файлы, указывающие на неизменяемое хранилище (например, Nix store `/nix/store/...`), корректно определяются как read-only: их фоновая актуализация пропускается с предупреждением `[WARN]`, а явная попытка перезаписи завершается с ошибкой `[ERROR]`.
+    - Файлы, являющиеся симлинками на пользовательские dotfiles (GNU Stow, chezmoi, yadm и др.), определяются как доступные для записи (writable) и поддерживаются в полном объёме без искусственных ограничений.
 
 ### Стандартизированный формат вывода (CLI Output & Logging)
 
@@ -108,15 +120,15 @@
 - Потоки разделены: сообщения уровня INFO и SUCCESS направляются в `sys.stdout`, ошибки (ERROR, WARN) — в `sys.stderr`.
 
 Формат строки собственных логов rc-sync:
-`[<LEVEL>] [<TIMESTAMP>] [<CONTEXT>] <MESSAGE>`
+`[<LEVEL>] [<TRIGGER>] [<CONTEXT>] <MESSAGE>`
 - `LEVEL`: `INFO` | `WARN` | `ERROR` | `SUCCESS`
-- `TIMESTAMP`: локальное время в формате `HH:MM:SS`
+- `TRIGGER`: `manual` (ручной запуск из CLI) | `up` (первичный запуск через daemon up) | `systemd` (фоновый запуск службой/таймером systemd)
 - `CONTEXT`:
-  - `[alias:<name>]` — операции с конкретным маппингом (например, `[alias:docs]`). Префикс `alias:` обязателен во избежание путаницы с подсистемами.
+  - `[init:<name>]` — операции первичной синхронизации (resync) для конкретного маппинга (например, `[init:docs]`).
+  - `[sync:<name>]` — операции регулярной синхронизации для конкретного маппинга (например, `[sync:docs]`).
   - `[sync]` — общие события запуска/завершения пакетной синхронизации.
   - `[lock]` — захват, ожидание и освобождение межпроцессной блокировки.
-  - `[daemon]` — операции управления жизненным циклом фоновой службы systemd (генерация юнитов, включение/отключение таймера, `daemon status`, перезагрузка systemd).
-  - `[init]` --- операции связанные c первичным resync.
+  - `[daemon]` — операции управления жизненным циклом фоновой службы systemd (генерация юнитов, включение/отключение таймера, статус демона, перезагрузка systemd).
 
 Потоковый вывод `rclone` (Streaming & Separation):
 - Вывод `rclone` (stdout/stderr) не буферизируется до конца, а **транслируется в реальном времени** построчно прямо во время работы процесса.
@@ -126,18 +138,18 @@
 
 Пример вывода:
 ```text
-[INFO] [05:15:00] [lock] Lock acquired by PID 14205.
-[INFO] [05:15:01] [sync] Starting sync for 2 mapping(s)...
-[INFO] [05:15:02] [alias:docs] Running: rclone bisync /home/user/Docs remote:Docs --resync
+[INFO] [manual] [lock] Lock acquired by PID 14205.
+[INFO] [manual] [sync] Starting sync for 2 mapping(s)...
+[INFO] [manual] [init:docs] Running: rclone bisync /home/user/Docs remote:Docs --resync
   │ 2026/10/02 05:15:03 NOTICE: bisync: Resyncing...
   │ 2026/10/02 05:15:04 INFO  : file1.txt: Copied (new)
-[SUCCESS] [05:15:05] [alias:docs] Mapping completed successfully.
-[INFO] [05:15:06] [alias:photos] Running: rclone bisync /home/user/Photos remote:Photos
+[SUCCESS] [manual] [init:docs] Mapping completed successfully.
+[INFO] [systemd] [sync:photos] Running: rclone bisync /home/user/Photos remote:Photos
   │ 2026/10/02 05:15:07 ERROR : corrupted.jpg: read error
   │ 2026/10/02 05:15:08 Fatal error: bisync aborted
-[ERROR] [05:15:08] [alias:photos] rclone exited with code 1.
-[SUCCESS] [05:15:09] [sync] Synchronization batch finished (1 succeeded, 1 failed).
-[INFO] [05:15:09] [lock] Lock released.
+[ERROR] [systemd] [sync:photos] rclone exited with code 1.
+[SUCCESS] [systemd] [sync] Synchronization batch finished (1 succeeded, 1 failed).
+[INFO] [systemd] [lock] Lock released.
 ```
 
 Формат вывода команды `status`:

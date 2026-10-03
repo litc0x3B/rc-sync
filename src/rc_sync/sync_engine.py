@@ -38,15 +38,12 @@ class SyncEngine:
         is_all = len(target_aliases) == 1 and target_aliases[0].lower() == "all"
 
         if is_all:
-            mappings_to_sync = [m for m in self.config.mappings if m.enabled]
+            mappings_to_sync = [m for m in self.config.mappings.values() if m.enabled]
             if not mappings_to_sync:
-                self._logger.info(
-                    "No active mappings found to sync.", extra={"context": "sync"}
-                )
+                self._logger.info("No active mappings found to sync.", extra={"context": "sync"})
                 return 0
         else:
-            alias_map = {m.alias: m for m in self.config.mappings}
-            unknown = [a for a in target_aliases if a not in alias_map]
+            unknown = [a for a in target_aliases if a not in self.config.mappings]
             if unknown:
                 for a in unknown:
                     self._logger.error(
@@ -55,10 +52,13 @@ class SyncEngine:
                     )
                 return 1
 
-            mappings_to_sync = [alias_map[a] for a in target_aliases]
+            mappings_to_sync = [self.config.mappings[a] for a in target_aliases]
 
         # Acquire global lock
         with self.lock:
+            # Strictly reload latest persistent state from disk after acquiring the lock
+            self.state_manager.load()
+
             self._logger.info(
                 f"Starting sync for {len(mappings_to_sync)} mapping(s)...",
                 extra={"context": "sync"},
@@ -70,7 +70,7 @@ class SyncEngine:
             for m in mappings_to_sync:
                 success = self._sync_single_mapping(
                     mapping=m,
-                    cli_resync=force_resync,
+                    force_resync=force_resync,
                     cli_override_flags=cli_override_flags,
                     cli_extra_flags=cli_extra_flags,
                 )
@@ -93,14 +93,14 @@ class SyncEngine:
     def _sync_single_mapping(
         self,
         mapping: MappingConfig,
-        cli_resync: bool,
+        force_resync: bool,
         cli_override_flags: bool,
         cli_extra_flags: str,
     ) -> bool:
         """Execute sync for one mapping and update its state."""
         state = self.state_manager.get_state(mapping.path1, mapping.path2)
-        is_init = not state.init_success
-        force_resync = cli_resync or is_init
+        is_init = force_resync or (not state.init_success)
+        mapping_ctx = f"init:{mapping.alias}" if is_init else f"sync:{mapping.alias}"
 
         exp_path1 = expand_path(mapping.path1)
         exp_path2 = expand_path(mapping.path2)
@@ -115,7 +115,7 @@ class SyncEngine:
                 )
                 self._logger.error(
                     err_msg,
-                    extra={"context": "init"},
+                    extra={"context": mapping_ctx},
                 )
                 self.state_manager.update_status(
                     mapping.path1,
@@ -134,7 +134,7 @@ class SyncEngine:
                 )
                 self._logger.error(
                     err_msg,
-                    extra={"context": "init"},
+                    extra={"context": mapping_ctx},
                 )
                 self.state_manager.update_status(
                     mapping.path1,
@@ -145,15 +145,21 @@ class SyncEngine:
                 self.state_manager.save()
                 return False
 
-            # Mandatory condition: at least one path must be empty (unless allow_resync_non_empty)
-            if (not res1.is_empty) and (not res2.is_empty) and (not mapping.allow_resync_non_empty):
+            # Mandatory condition: at least one path must be empty
+            # (unless allow_init_non_empty or force_resync)
+            if (
+                (not res1.is_empty)
+                and (not res2.is_empty)
+                and (not mapping.allow_init_non_empty)
+                and (not force_resync)
+            ):
                 precond_msg = (
                     f"Initial resync precondition failed for alias '{mapping.alias}': "
                     "both paths are non-empty and AllowResyncNonEmpty is false."
                 )
                 self._logger.error(
                     precond_msg,
-                    extra={"context": "init"},
+                    extra={"context": mapping_ctx},
                 )
                 self.state_manager.update_status(
                     mapping.path1,
@@ -170,7 +176,7 @@ class SyncEngine:
                 if code != 0:
                     self._logger.error(
                         f"Failed to create path1 '{mapping.path1}': {err}",
-                        extra={"context": "init"},
+                        extra={"context": mapping_ctx},
                     )
                     self.state_manager.update_status(
                         mapping.path1,
@@ -186,7 +192,7 @@ class SyncEngine:
                 if code != 0:
                     self._logger.error(
                         f"Failed to create path2 '{mapping.path2}': {err}",
-                        extra={"context": "init"},
+                        extra={"context": mapping_ctx},
                     )
                     self.state_manager.update_status(
                         mapping.path1,
@@ -202,12 +208,13 @@ class SyncEngine:
             cli_override=cli_override_flags,
             cli_extra_flags=cli_extra_flags,
             is_init=is_init,
-            global_extra_flags=self.config.extra_flags,
+            global_flags=self.config.global_flags,
             mapping_extra_flags=mapping.extra_flags,
             mapping_override_flags=mapping.override_flags,
             mapping_extra_flags_init=mapping.extra_flags_init,
             mapping_override_flags_init=mapping.override_flags_init,
             sync_freq_minutes=self.config.sync_freq_minutes,
+            global_flags_init=self.config.global_flags_init,
         )
 
         exit_code = self.runner.run_bisync(
@@ -215,7 +222,8 @@ class SyncEngine:
             path2=exp_path2,
             flags=flags,
             alias=mapping.alias,
-            force_resync=force_resync,
+            force_resync=is_init,
+            context=mapping_ctx,
         )
 
         if exit_code == 0:

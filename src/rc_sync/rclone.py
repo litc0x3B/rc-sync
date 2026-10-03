@@ -49,32 +49,31 @@ def combine_flags(
     cli_override: bool,
     cli_extra_flags: str,
     is_init: bool,
-    global_extra_flags: str,
+    global_flags: str,
     mapping_extra_flags: str,
-    mapping_override_flags: str | None,
+    mapping_override_flags: bool,
     mapping_extra_flags_init: str,
-    mapping_override_flags_init: str | None,
+    mapping_override_flags_init: bool,
     sync_freq_minutes: int,
+    global_flags_init: str = "",
 ) -> list[str]:
     """Combine global, mapping, and CLI flags according to spec rules."""
     if cli_override:
         parts = [cli_extra_flags]
     else:
         if is_init:
-            if mapping_override_flags_init is not None:
-                parts = [mapping_override_flags_init, cli_extra_flags]
+            if mapping_override_flags_init:
+                parts = [mapping_extra_flags_init, cli_extra_flags]
             else:
-                parts = [global_extra_flags, mapping_extra_flags_init, cli_extra_flags]
+                parts = [global_flags_init, mapping_extra_flags_init, cli_extra_flags]
         else:
-            if mapping_override_flags is not None:
-                parts = [mapping_override_flags, cli_extra_flags]
+            if mapping_override_flags:
+                parts = [mapping_extra_flags, cli_extra_flags]
             else:
-                parts = [global_extra_flags, mapping_extra_flags, cli_extra_flags]
+                parts = [global_flags, mapping_extra_flags, cli_extra_flags]
 
     interpolated = [
-        interpolate_flags(p, sync_freq_minutes).strip()
-        for p in parts
-        if p and p.strip()
+        interpolate_flags(p, sync_freq_minutes).strip() for p in parts if p and p.strip()
     ]
     combined_str = " ".join(interpolated)
     return shlex.split(combined_str)
@@ -122,6 +121,7 @@ class RcloneRunner:
         flags: list[str],
         alias: str,
         force_resync: bool = False,
+        context: str | None = None,
     ) -> int:
         """Run rclone bisync with real-time streaming output."""
         cmd = [self.rclone_path, "bisync", path1, path2]
@@ -132,9 +132,11 @@ class RcloneRunner:
 
         cmd.extend(final_flags)
 
+        log_context = context or (f"init:{alias}" if force_resync else f"sync:{alias}")
+
         # Log full command
         cmd_str = " ".join(shlex.quote(c) if (" " in c or not c) else c for c in cmd)
-        self._logger.info(f"Running: {cmd_str}", extra={"context": f"alias:{alias}"})
+        self._logger.info(f"Running: {cmd_str}", extra={"context": log_context})
 
         proc = None
         try:
@@ -156,12 +158,12 @@ class RcloneRunner:
             if code == 0:
                 self._logger.success(
                     "Mapping completed successfully.",
-                    extra={"context": f"alias:{alias}"},
+                    extra={"context": log_context},
                 )
             else:
                 self._logger.error(
                     f"rclone exited with code {code}.",
-                    extra={"context": f"alias:{alias}"},
+                    extra={"context": log_context},
                 )
             return code
 
@@ -176,6 +178,6 @@ class RcloneRunner:
         except Exception as e:
             self._logger.error(
                 f"Failed to execute rclone: {e}",
-                extra={"context": f"alias:{alias}"},
+                extra={"context": log_context},
             )
             return 1

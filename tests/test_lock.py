@@ -7,6 +7,7 @@ from rc_sync.lock import ProcessLock
 
 def _hold_lock(lock_path_str, acquired_event, release_event):
     from pathlib import Path
+
     lock = ProcessLock(Path(lock_path_str))
     lock.acquire()
     acquired_event.set()

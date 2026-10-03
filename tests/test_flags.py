@@ -23,28 +23,29 @@ def test_combine_flags_cli_override():
         cli_override=True,
         cli_extra_flags="--dry-run -v",
         is_init=False,
-        global_extra_flags="--resilient --recover --max-lock %tm",
+        global_flags="--resilient --recover --max-lock %tm",
         mapping_extra_flags="--fast-list",
-        mapping_override_flags=None,
+        mapping_override_flags=False,
         mapping_extra_flags_init="",
-        mapping_override_flags_init=None,
+        mapping_override_flags_init=False,
         sync_freq_minutes=5,
     )
     assert flags == ["--dry-run", "-v"]
 
 
 def test_combine_flags_init_without_override():
-    # Initial resync without override: Global ExtraFlags + Mapping ExtraFlagsInit + CLI extraFlags
+    # Initial resync: Global flags_init + Mapping extra_flags_init + CLI extra_flags
     flags = combine_flags(
         cli_override=False,
         cli_extra_flags="--verbose",
         is_init=True,
-        global_extra_flags="--resilient --recover --max-lock %tm",
+        global_flags="--regular-global-ignored",
         mapping_extra_flags="--ignored",
-        mapping_override_flags=None,
+        mapping_override_flags=False,
         mapping_extra_flags_init="--backup-dir old",
-        mapping_override_flags_init=None,
+        mapping_override_flags_init=False,
         sync_freq_minutes=5,
+        global_flags_init="--resilient --recover --max-lock %tm",
     )
     assert flags == [
         "--resilient",
@@ -57,49 +58,67 @@ def test_combine_flags_init_without_override():
     ]
 
 
-def test_combine_flags_init_with_override():
-    # Initial resync with override: OverrideFlagsInit + CLI extraFlags (Global ignored)
+def test_combine_flags_init_default_empty_global():
+    # Initial resync with default empty Global flags_init
     flags = combine_flags(
         cli_override=False,
         cli_extra_flags="--verbose",
         is_init=True,
-        global_extra_flags="--resilient --recover --max-lock %tm",
+        global_flags="--regular-global-ignored",
         mapping_extra_flags="--ignored",
-        mapping_override_flags=None,
-        mapping_extra_flags_init="",
-        mapping_override_flags_init="--custom-init",
+        mapping_override_flags=False,
+        mapping_extra_flags_init="--backup-dir old",
+        mapping_override_flags_init=False,
         sync_freq_minutes=5,
+        global_flags_init="",
+    )
+    assert flags == ["--backup-dir", "old", "--verbose"]
+
+
+def test_combine_flags_init_with_override():
+    # Initial resync with mapping override: mapping extra_flags_init + CLI extra_flags
+    flags = combine_flags(
+        cli_override=False,
+        cli_extra_flags="--verbose",
+        is_init=True,
+        global_flags="--ignored",
+        mapping_extra_flags="--ignored",
+        mapping_override_flags=False,
+        mapping_extra_flags_init="--custom-init",
+        mapping_override_flags_init=True,
+        sync_freq_minutes=5,
+        global_flags_init="--global-init-ignored",
     )
     assert flags == ["--custom-init", "--verbose"]
 
 
 def test_combine_flags_regular_without_override():
-    # Regular sync: Global ExtraFlags + Mapping ExtraFlags + CLI extraFlags
+    # Regular sync: Global flags + Mapping extra_flags + CLI extra_flags
     flags = combine_flags(
         cli_override=False,
         cli_extra_flags="--dry-run",
         is_init=False,
-        global_extra_flags="--resilient --max-lock %tm",
+        global_flags="--resilient --max-lock %tm",
         mapping_extra_flags="--fast-list",
-        mapping_override_flags=None,
+        mapping_override_flags=False,
         mapping_extra_flags_init="--ignored",
-        mapping_override_flags_init=None,
+        mapping_override_flags_init=False,
         sync_freq_minutes=10,
     )
     assert flags == ["--resilient", "--max-lock", "10m", "--fast-list", "--dry-run"]
 
 
 def test_combine_flags_regular_with_override():
-    # Regular sync with mapping override: OverrideFlags + CLI extraFlags (Global ignored)
+    # Regular sync with mapping override: Mapping extra_flags + CLI extra_flags (global ignored)
     flags = combine_flags(
         cli_override=False,
         cli_extra_flags="--dry-run",
         is_init=False,
-        global_extra_flags="--resilient --max-lock %tm",
-        mapping_extra_flags="",
-        mapping_override_flags="--only-this",
+        global_flags="--resilient --max-lock %tm",
+        mapping_extra_flags="--only-this",
+        mapping_override_flags=True,
         mapping_extra_flags_init="",
-        mapping_override_flags_init=None,
+        mapping_override_flags_init=False,
         sync_freq_minutes=10,
     )
     assert flags == ["--only-this", "--dry-run"]

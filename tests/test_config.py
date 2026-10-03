@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -20,51 +21,41 @@ def test_mapping_config_valid():
         path1="/local/docs",
         path2="remote:docs",
         extra_flags="--fast-list",
-        allow_resync_non_empty=True,
+        allow_init_non_empty=True,
     )
     assert m.alias == "docs"
     assert m.path1 == "/local/docs"
     assert m.path2 == "remote:docs"
     assert m.extra_flags == "--fast-list"
-    assert m.allow_resync_non_empty is True
+    assert m.allow_init_non_empty is True
     assert m.enabled is True
 
 
-def test_mapping_config_pascal_case():
-    m = MappingConfig.model_validate({
-        "Alias": "photos",
-        "Path1": "~/Photos",
-        "Path2": "remote:Photos",
-        "ExtraFlagsInit": "--backup-dir old",
-        "AllowResyncNonEmpty": False,
-        "Enabled": False,
-    })
-    assert m.alias == "photos"
-    assert m.path1 == "~/Photos"
-    assert m.extra_flags_init == "--backup-dir old"
-    assert m.enabled is False
-
-
-def test_mapping_config_conflict_extra_and_override():
-    with pytest.raises(ValidationError, match="extra_flags.*override_flags"):
-        MappingConfig(
-            alias="docs",
-            path1="p1",
-            path2="p2",
-            extra_flags="--flag1",
-            override_flags="--flag2",
+def test_mapping_config_rejects_camel_case():
+    with pytest.raises(ValidationError):
+        MappingConfig.model_validate(
+            {
+                "Alias": "photos",
+                "Path1": "~/Photos",
+                "Path2": "remote:Photos",
+            }
         )
 
 
-def test_mapping_config_conflict_init():
-    with pytest.raises(ValidationError, match="extra_flags_init.*override_flags_init"):
-        MappingConfig(
-            alias="docs",
-            path1="p1",
-            path2="p2",
-            extra_flags_init="--flag1",
-            override_flags_init="--flag2",
-        )
+def test_mapping_config_override_flags():
+    m = MappingConfig(
+        alias="docs",
+        path1="p1",
+        path2="p2",
+        extra_flags="--flag1",
+        override_flags=True,
+        extra_flags_init="--flag2",
+        override_flags_init=True,
+    )
+    assert m.override_flags is True
+    assert m.override_flags_init is True
+    assert m.extra_flags == "--flag1"
+    assert m.extra_flags_init == "--flag2"
 
 
 def test_global_config_freq_validation():
@@ -86,25 +77,63 @@ def test_global_config_unique_aliases():
 def test_load_config_from_yaml(tmp_path):
     config_file = tmp_path / "config.yaml"
     config_file.write_text("""
-SyncFreqMinutes: 10
-RclonePath: /usr/local/bin/rclone
-ExtraFlags: "--max-lock %tm"
-Mappings:
-  - Alias: books
-    Path1: /home/user/books
-    Path2: remote:books
-    OverrideFlags: "--verbose"
+sync_freq_minutes: 10
+rclone_path: /usr/local/bin/rclone
+global_flags: "--max-lock %tm"
+global_flags_init: "--fast-list"
+mappings:
+  - alias: books
+    path1: /home/user/books
+    path2: remote:books
+    extra_flags: "--verbose"
+    override_flags: true
 """)
     cfg = load_config(config_file)
     assert cfg.sync_freq_minutes == 10
     assert cfg.rclone_path == "/usr/local/bin/rclone"
-    assert cfg.extra_flags == "--max-lock %tm"
+    assert cfg.global_flags == "--max-lock %tm"
+    assert cfg.global_flags_init == "--fast-list"
     assert len(cfg.mappings) == 1
-    assert cfg.mappings[0].alias == "books"
-    assert cfg.mappings[0].override_flags == "--verbose"
+    assert "books" in cfg.mappings
+    assert cfg.mappings["books"].alias == "books"
+    assert cfg.mappings["books"].extra_flags == "--verbose"
+    assert cfg.mappings["books"].override_flags is True
 
 
-def test_schema_and_template_generation(tmp_path):
+def test_load_config_from_yaml_dict_format(tmp_path):
+    config_file = tmp_path / "config_dict.yaml"
+    config_file.write_text("""
+sync_freq_minutes: 5
+mappings:
+  docs:
+    path1: ~/Docs
+    path2: remote:Docs
+    enabled: true
+  photos:
+    path1: ~/Photos
+    path2: remote:Photos
+    enabled: false
+""")
+    cfg = load_config(config_file)
+    assert len(cfg.mappings) == 2
+    assert "docs" in cfg.mappings
+    assert cfg.mappings["docs"].alias == "docs"
+    assert cfg.mappings["docs"].enabled is True
+    assert "photos" in cfg.mappings
+    assert cfg.mappings["photos"].alias == "photos"
+    assert cfg.mappings["photos"].enabled is False
+
+
+def test_config_empty_mapping_key():
+    with pytest.raises(ValidationError, match="Mapping alias cannot be empty"):
+        Config.model_validate({"mappings": {"": {"path1": "a", "path2": "b"}}})
+
+    with pytest.raises(ValidationError, match="non-empty 'alias'"):
+        Config.model_validate({"mappings": [{"alias": "  ", "path1": "a", "path2": "b"}]})
+
+
+def test_schema_and_template_generation(tmp_path, monkeypatch):
+    monkeypatch.setattr("rc_sync.config.get_installed_schema_path", lambda: None)
     template = get_default_config_template()
     assert "# yaml-language-server: $schema=./schema.json" in template
     assert "sync_freq_minutes: 5" in template
@@ -114,9 +143,11 @@ def test_schema_and_template_generation(tmp_path):
 
     # Write template and schema
     target_config = tmp_path / "subdir" / "config.yaml"
-    write_template(target_config)
+    generated_schema = write_template(target_config)
     assert target_config.exists()
-    assert (tmp_path / "subdir" / "schema.json").exists()
+    assert generated_schema is not None
+    assert generated_schema.exists()
+    assert "# yaml-language-server: $schema=./schema.json" in target_config.read_text()
 
     # Re-writing should fail
     with pytest.raises(FileExistsError):
@@ -131,12 +162,29 @@ def test_schema_and_template_generation(tmp_path):
 
 
 def test_installed_schema_lookup(tmp_path, monkeypatch):
-    share_dir = tmp_path / "share" / "rc-sync"
-    share_dir.mkdir(parents=True)
-    fake_schema = share_dir / "schema.json"
-    fake_schema.write_text("{}")
-
-    monkeypatch.setenv("XDG_DATA_DIRS", str(tmp_path / "share"))
+    fake_schema = tmp_path / "share" / "rc-sync" / "schema.json"
+    monkeypatch.setattr("rc_sync.config.get_installed_schema_path", lambda: fake_schema)
     template = get_default_config_template()
     assert f"# yaml-language-server: $schema={fake_schema}" in template
 
+
+def test_write_template_with_installed_schema(tmp_path, monkeypatch):
+    fake_schema = tmp_path / "share" / "rc-sync" / "schema.json"
+    monkeypatch.setattr("rc_sync.config.get_installed_schema_path", lambda: fake_schema)
+    target_config = tmp_path / "custom" / "config.yaml"
+    generated_schema = write_template(target_config)
+    assert generated_schema is None
+    assert target_config.exists()
+    assert not (tmp_path / "custom" / "schema.json").exists()
+    assert f"# yaml-language-server: $schema={fake_schema}" in target_config.read_text()
+
+
+def test_root_schema_json_sync():
+    """Ensure root schema.json is in sync with the Pydantic model."""
+    root_schema = Path(__file__).resolve().parent.parent / "schema.json"
+    assert root_schema.is_file(), "schema.json must exist in repository root"
+    on_disk = json.loads(root_schema.read_text(encoding="utf-8"))
+    actual = get_json_schema()
+    assert on_disk == actual, (
+        "Root schema.json is out of date. Run 'rc-sync config schema print > schema.json'"
+    )

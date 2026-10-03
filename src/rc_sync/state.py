@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from rc_sync.paths import get_state_path
 
@@ -25,33 +25,25 @@ class MappingState(BaseModel):
     """Persistent state of a single mapping."""
 
     model_config = ConfigDict(
-        populate_by_name=True,
         use_enum_values=True,
     )
 
-    path1: str = Field(..., validation_alias=AliasChoices("path1", "Path1"))
-    path2: str = Field(..., validation_alias=AliasChoices("path2", "Path2"))
-    init_success: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("init_success", "InitSuccess"),
-    )
-    last_sync_time: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("last_sync_time", "LastSyncTime"),
-    )
-    status: MappingStatus = Field(
-        default=MappingStatus.INIT_PENDING,
-        validation_alias=AliasChoices("status", "Status"),
-    )
+    path1: str
+    path2: str
+    init_success: bool = False
+    last_sync_time: str | None = None
+    status: MappingStatus = MappingStatus.INIT_PENDING
 
 
 def _normalize_key(path1: str, path2: str) -> tuple[str, str]:
     """Normalize paths for stable mapping identity."""
+
     def clean(p: str) -> str:
         s = p.strip()
         if len(s) > 1 and s.endswith("/"):
             return s.rstrip("/")
         return s
+
     return (clean(path1), clean(path2))
 
 
@@ -65,9 +57,9 @@ class StateManager:
 
     def load(self) -> None:
         """Load state from disk if exists."""
-        self._states.clear()
         if not self.state_path.is_file():
             return
+        self._states.clear()
 
         try:
             with open(self.state_path, encoding="utf-8") as f:
@@ -141,9 +133,7 @@ class StateManager:
         """Atomically persist state to disk."""
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
 
-        data = {
-            "mappings": [state.model_dump() for state in self._states.values()]
-        }
+        data = {"mappings": [state.model_dump() for state in self._states.values()]}
 
         # Atomic write: write to temp file in same directory, then rename
         temp_file = None

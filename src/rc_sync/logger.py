@@ -1,12 +1,24 @@
-"""Custom logging implementation for rc-sync meeting specification requirements."""
-
 import logging
+import os
 import sys
-import time
+from pathlib import Path
 from typing import Any, cast
 
 SUCCESS_LEVEL = 25
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
+
+
+def get_trigger_mode() -> str:
+    """Return 'up', 'systemd', or 'manual' based on environment."""
+    val = os.environ.get("RC_SYNC_TRIGGER")
+    if val in ("up", "systemd", "manual"):
+        return val
+    return "manual"
+
+
+def set_trigger_mode(mode: str) -> None:
+    """Set global trigger mode ('manual', 'up', 'systemd')."""
+    os.environ["RC_SYNC_TRIGGER"] = mode
 
 
 class RcSyncLogger(logging.Logger):
@@ -21,7 +33,11 @@ logging.setLoggerClass(RcSyncLogger)
 
 
 class RcSyncFormatter(logging.Formatter):
-    """Custom formatter: [<LEVEL>] [<TIMESTAMP>] [<CONTEXT>] <MESSAGE>"""
+    """Custom formatter: [<LEVEL>] [<TRIGGER>] [<CONTEXT>] <MESSAGE>"""
+
+    def __init__(self, trigger: str | None = None) -> None:
+        super().__init__()
+        self._trigger = trigger
 
     def format(self, record: logging.LogRecord) -> str:
         # Determine level name
@@ -29,8 +45,8 @@ class RcSyncFormatter(logging.Formatter):
         if level == "WARNING":
             level = "WARN"
 
-        # Determine timestamp: HH:MM:SS
-        timestamp = time.strftime("%H:%M:%S", time.localtime(record.created))
+        # Determine trigger mode: manual, up, or systemd
+        trigger = getattr(record, "trigger", None) or self._trigger or get_trigger_mode()
 
         # Determine context
         context = getattr(record, "context", None)
@@ -43,7 +59,7 @@ class RcSyncFormatter(logging.Formatter):
             context_str = f"[{context_str}]"
 
         msg = record.getMessage()
-        return f"[{level}] [{timestamp}] {context_str} {msg}"
+        return f"[{level}] [{trigger}] {context_str} {msg}"
 
 
 class DynamicStreamHandler(logging.Handler):
@@ -104,6 +120,19 @@ def setup_logger(level: int = logging.INFO) -> RcSyncLogger:
         logger.handlers.clear()
         logger.addHandler(stdout_handler)
         logger.addHandler(stderr_handler)
+
+        if get_trigger_mode() != "systemd" and Path("/dev/log").exists():
+            try:
+                from logging.handlers import SysLogHandler
+
+                syslog_handler = SysLogHandler(address="/dev/log")
+                syslog_handler.ident = "rc-sync: "
+                syslog_handler.setLevel(logging.DEBUG)
+                syslog_handler.setFormatter(formatter)
+                logger.addHandler(syslog_handler)
+            except Exception:
+                pass
+
         logger.propagate = False
 
         _configured = True
@@ -119,5 +148,15 @@ def get_logger() -> RcSyncLogger:
 def stream_rclone_line(line: str) -> None:
     """Stream a single line from rclone output with the '  │ ' prefix."""
     clean_line = line.rstrip("\r\n")
-    sys.stdout.write(f"  │ {clean_line}\n")
+    prefix_line = f"  │ {clean_line}"
+    sys.stdout.write(f"{prefix_line}\n")
     sys.stdout.flush()
+
+    if get_trigger_mode() != "systemd" and Path("/dev/log").exists():
+        try:
+            import syslog
+
+            syslog.openlog(ident="rc-sync", facility=syslog.LOG_USER)
+            syslog.syslog(syslog.LOG_INFO, prefix_line)
+        except Exception:
+            pass
