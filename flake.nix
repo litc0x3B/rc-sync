@@ -58,7 +58,7 @@
       });
 
       overlays.default = final: prev: {
-        rc-sync = final.callPackage ./default.nix {};
+        rc-sync = self.packages.${prev.stdenv.hostPlatform.system}.default;
       };
 
       homeManagerModules.default = import ./nix/hm-module.nix self;
